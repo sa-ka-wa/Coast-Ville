@@ -139,16 +139,30 @@ const Navbar = () => {
           style={{
             border: "none",
             minWidth: 400,
+            background: "transparent",
+            color: "#111827",
           }}
+          className="navbar-menu"
         />
       </div>
 
       {/* User Menu */}
       <div>
-        <Dropdown menu={{ items: userMenu }} placement="bottomRight">
-          <Button type="text" style={{ display: "flex", alignItems: "center" }}>
+        <Dropdown
+          menu={{
+            items: userMenu,
+            className: "user-menu-dropdown",
+          }}
+          placement="bottomRight"
+        >
+          <Button
+            type="text"
+            style={{ display: "flex", alignItems: "center", color: "#111827" }}
+          >
             <Avatar icon={<UserOutlined />} />
-            <span style={{ marginLeft: 8 }}>{user?.name || "User"}</span>
+            <span style={{ marginLeft: 8, color: "#111827" }}>
+              {user?.name || "User"}
+            </span>
           </Button>
         </Dropdown>
       </div>

@@ -188,12 +188,32 @@ a {
   padding: 20px;
 }
 
-.statistic-card .ant-statistic-title {
-  color: rgba(255, 255, 255, 0.8);
+.statistic-card,
+.statistic-card .ant-card-body,
+.statistic-card .ant-card,
+.statistic-card .ant-statistic,
+.statistic-card .ant-statistic-title,
+.statistic-card .ant-statistic-content,
+.statistic-card .ant-statistic-content-value,
+.statistic-card .ant-statistic-content-suffix,
+.statistic-card .ant-statistic-content-value-decimal,
+.statistic-card .ant-statistic-content-value-int,
+.statistic-card .ant-statistic-title span,
+.statistic-card .ant-statistic-content span {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
 }
 
-.statistic-card .ant-statistic-content {
-  color: white;
+.statistic-card .ant-statistic-title {
+  opacity: 1 !important;
+}
+
+.ant-statistic-title,
+.ant-statistic-content,
+.ant-statistic-content-value,
+.ant-statistic-content-suffix {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
 }
 
 .statistic-card-primary {
@@ -367,11 +387,37 @@ a {
 
 .ant-menu-item-selected {
   background: var(--primary-light) !important;
-  color: var(--primary-color) !important;
+  color: #111827 !important;
 }
 
 .ant-menu-item-selected .ant-menu-item-icon {
-  color: var(--primary-color);
+  color: #111827 !important;
+}
+
+.navbar-menu .ant-menu-item,
+.navbar-menu .ant-menu-item .ant-menu-title-content,
+.navbar-menu .ant-menu-item-icon {
+  color: #111827 !important;
+}
+
+.navbar-menu .ant-menu-item:hover,
+.navbar-menu .ant-menu-item:hover .ant-menu-title-content,
+.navbar-menu .ant-menu-item:hover .ant-menu-item-icon {
+  color: #111827 !important;
+}
+
+.user-menu-dropdown .ant-dropdown-menu-item,
+.user-menu-dropdown .ant-dropdown-menu-item .ant-dropdown-menu-title-content,
+.user-menu-dropdown .ant-dropdown-menu-item-icon {
+  color: #111827 !important;
+}
+
+.user-menu-dropdown .ant-dropdown-menu-item:hover,
+.user-menu-dropdown
+  .ant-dropdown-menu-item:hover
+  .ant-dropdown-menu-title-content,
+.user-menu-dropdown .ant-dropdown-menu-item:hover .ant-dropdown-menu-item-icon {
+  color: #111827 !important;
 }
 
 /* Layout Styles */

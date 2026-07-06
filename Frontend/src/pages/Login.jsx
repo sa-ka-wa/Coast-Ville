@@ -73,13 +73,15 @@ const Login = () => {
           width: 400,
           boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
           borderRadius: 8,
+          background: "#ffffff",
+          color: "#111827",
         }}
       >
         <div style={{ textAlign: "center", marginBottom: 24 }}>
           <Title level={2} style={{ color: "#1890ff", marginBottom: 4 }}>
             🏠 RentManager
           </Title>
-          <Text type="secondary">Property Management System</Text>
+          <Text style={{ color: "#374151" }}>Property Management System</Text>
         </div>
 
         {error && (
@@ -146,7 +148,7 @@ const Login = () => {
           </Form.Item>
 
           <div style={{ textAlign: "center", marginTop: 16 }}>
-            <Text type="secondary">
+            <Text style={{ color: "#374151" }}>
               Don't have an account? <Link to="/register">Register now</Link>
             </Text>
           </div>
