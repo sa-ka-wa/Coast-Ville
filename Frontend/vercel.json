@@ -1,0 +1,16 @@
+{
+  "buildCommand": "cd Frontend && npm install && npm run build",
+  "outputDirectory": "Frontend/dist",
+  "devCommand": "cd Frontend && npm run dev",
+  "installCommand": "cd Frontend && npm install",
+  "framework": "vite",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "env": {
+    "VITE_API_URL": "https://rentmanager-backend.onrender.com/api"
+  }
+}
