@@ -1,0 +1,7 @@
+# App/Controllers/__init__.py
+from App.Controllers.PropertyController import PropertyController
+from App.Controllers.TenantController import TenantController
+from App.Controllers.PaymentController import PaymentController
+from App.Controllers.WaterController import WaterController
+from App.Controllers.ExpensesController import ExpensesController
+from App.Controllers.ReportsController import ReportsController
