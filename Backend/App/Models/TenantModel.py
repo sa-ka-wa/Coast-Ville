@@ -27,12 +27,26 @@ class Tenant(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationships
+    # Relationships - ONLY KEEP payments
+    # REMOVE water_readings and water_bills from here
+    # They are defined in WaterReading and WaterBill models
     payments = db.relationship('Payment', backref='tenant', lazy=True)
-    water_readings = db.relationship('WaterReading', backref='tenant', lazy=True)
-    water_bills = db.relationship('WaterBill', backref='tenant', lazy=True)
+
+    # REMOVE these lines:
+    # water_readings = db.relationship('WaterReading', backref='tenant', lazy=True)
+    # water_bills = db.relationship('WaterBill', backref='tenant', lazy=True)
 
     def to_dict(self):
+        # Get house number from unit if available
+        house_no = None
+        if self.unit:
+            house_no = self.unit.unit_number
+
+        # If no house number, try to get it from the old houseNo column if it exists
+        # or use a default
+        if not house_no and hasattr(self, 'houseNo'):
+            house_no = self.houseNo
+
         return {
             'id': self.id,
             'property_id': self.property_id,
@@ -50,5 +64,5 @@ class Tenant(db.Model):
             'emergency_contact_name': self.emergency_contact_name,
             'emergency_contact_phone': self.emergency_contact_phone,
             'notes': self.notes,
-            'houseNo': self.unit.unit_number if self.unit else None
+            'houseNo': house_no if house_no else None
         }

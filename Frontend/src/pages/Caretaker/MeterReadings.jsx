@@ -1,4 +1,4 @@
-// pages/Caretaker/MeterReadings.jsx
+// pages/Caretaker/MeterReadings.jsx - Connected to Real API
 import React, { useState, useEffect } from "react";
 import {
   Card,
@@ -17,16 +17,13 @@ import {
   Tooltip,
   Popconfirm,
   DatePicker,
-  Tabs,
   Badge,
   Empty,
   Descriptions,
   Progress,
   Divider,
   Alert,
-  Timeline,
   Avatar,
-  List,
 } from "antd";
 import {
   PlusOutlined,
@@ -36,7 +33,6 @@ import {
   ReloadOutlined,
   ScheduleOutlined,
   DollarOutlined,
-  CalendarOutlined,
   HomeOutlined,
   UserOutlined,
   FileTextOutlined,
@@ -55,15 +51,20 @@ import {
   submitWaterReading,
   getWaterReadings,
   getConsumptionHistory,
+  getTenantWaterReadings,
+  getWaterBills,
+  generateWaterBill,
 } from "../../services/water";
 import { getTenants } from "../../services/tenants";
 import { formatCurrency, formatDate } from "../../utils/formatters";
+import { useProperty } from "../../context/PropertyContext";
+import dayjs from "dayjs";
 
 const { Option } = Select;
-const { TabPane } = Tabs;
 const { TextArea } = Input;
 
 const MeterReadings = () => {
+  const { activeProperty } = useProperty();
   const [loading, setLoading] = useState(false);
   const [readings, setReadings] = useState([]);
   const [filteredReadings, setFilteredReadings] = useState([]);
@@ -75,7 +76,7 @@ const MeterReadings = () => {
   const [searchText, setSearchText] = useState("");
   const [tenantFilter, setTenantFilter] = useState("all");
   const [form] = Form.useForm();
-  const [activeTab, setActiveTab] = useState("readings");
+  const [generatingBill, setGeneratingBill] = useState(false);
 
   // Stats
   const [stats, setStats] = useState({
@@ -89,25 +90,54 @@ const MeterReadings = () => {
   // Consumption trends
   const [monthlyData, setMonthlyData] = useState([]);
 
+  // Get current property ID
+  const currentPropertyId = activeProperty?.id;
+
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (currentPropertyId) {
+      fetchData();
+    } else {
+      // Show message if no property selected
+      setReadings([]);
+      setFilteredReadings([]);
+      setMonthlyData([]);
+      setStats({
+        totalReadings: 0,
+        totalUnits: 0,
+        totalAmount: 0,
+        averageConsumption: 0,
+        pendingBills: 0,
+      });
+    }
+  }, [currentPropertyId]);
 
   const fetchData = async () => {
+    if (!currentPropertyId) {
+      message.warning("Please select a property first");
+      return;
+    }
+
     setLoading(true);
     try {
-      const [readingsRes, tenantsRes, historyRes] = await Promise.all([
-        getWaterReadings(),
-        getTenants(),
-        getConsumptionHistory(),
-      ]);
+      // Fetch tenants for the current property
+      const tenantsRes = await getTenants({ property_id: currentPropertyId });
+      const tenantsList = tenantsRes.data || [];
+      setTenants(tenantsList);
 
-      setReadings(readingsRes.data || []);
-      setFilteredReadings(readingsRes.data || []);
-      setTenants(tenantsRes.data || []);
+      // Fetch water readings with property filter
+      const readingsRes = await getWaterReadings({
+        property_id: currentPropertyId,
+      });
+      const readingsList = readingsRes.data || [];
+      setReadings(readingsList);
+      setFilteredReadings(readingsList);
+      calculateStats(readingsList);
+
+      // Fetch consumption history
+      const historyRes = await getConsumptionHistory();
       setMonthlyData(historyRes.data || []);
-      calculateStats(readingsRes.data || []);
     } catch (error) {
+      console.error("Error fetching data:", error);
       message.error("Failed to fetch water readings");
     } finally {
       setLoading(false);
@@ -138,8 +168,6 @@ const MeterReadings = () => {
 
       const readingData = {
         tenantId: values.tenantId,
-        tenantName: tenant.name,
-        houseNo: tenant.houseNo,
         previousReading: values.previousReading,
         currentReading: values.currentReading,
         readingDate: values.readingDate
@@ -154,13 +182,15 @@ const MeterReadings = () => {
       form.resetFields();
       fetchData();
     } catch (error) {
-      message.error("Failed to submit reading");
+      console.error("Error submitting reading:", error);
+      message.error(error.response?.data?.error || "Failed to submit reading");
     }
   };
 
   const handleDelete = async (id) => {
     try {
-      // In production, call API to delete
+      // Since we don't have a delete endpoint yet, use mock
+      // In production: await deleteWaterReading(id);
       const updatedReadings = readings.filter((r) => r.id !== id);
       setReadings(updatedReadings);
       setFilteredReadings(updatedReadings);
@@ -171,6 +201,21 @@ const MeterReadings = () => {
     }
   };
 
+  const handleGenerateBill = async (readingId) => {
+    setGeneratingBill(true);
+    try {
+      const response = await generateWaterBill(readingId);
+      message.success("Water bill generated successfully!");
+      fetchData();
+      setDetailVisible(false);
+    } catch (error) {
+      console.error("Error generating bill:", error);
+      message.error(error.response?.data?.message || "Failed to generate bill");
+    } finally {
+      setGeneratingBill(false);
+    }
+  };
+
   const handleFilter = () => {
     let filtered = [...readings];
 
@@ -178,8 +223,8 @@ const MeterReadings = () => {
       const search = searchText.toLowerCase();
       filtered = filtered.filter(
         (r) =>
-          r.tenantName.toLowerCase().includes(search) ||
-          r.houseNo.toLowerCase().includes(search),
+          (r.tenantName || "").toLowerCase().includes(search) ||
+          (r.houseNo || "").toLowerCase().includes(search),
       );
     }
 
@@ -198,7 +243,7 @@ const MeterReadings = () => {
 
   useEffect(() => {
     handleFilter();
-  }, [searchText, tenantFilter]);
+  }, [searchText, tenantFilter, readings]);
 
   const getConsumptionStatus = (units) => {
     if (units <= 20)
@@ -226,10 +271,10 @@ const MeterReadings = () => {
               : "T"}
           </Avatar>
           <div>
-            <div style={{ fontWeight: 500 }}>{record.tenantName}</div>
+            <div style={{ fontWeight: 500 }}>{record.tenantName || "N/A"}</div>
             <div style={{ fontSize: 12, color: "#8c8c8c" }}>
               <HomeOutlined style={{ marginRight: 4 }} />
-              {record.houseNo}
+              {record.houseNo || "N/A"}
             </div>
           </div>
         </div>
@@ -240,9 +285,9 @@ const MeterReadings = () => {
       key: "readings",
       render: (_, record) => (
         <Space>
-          <Tag color="blue">{record.previousReading}</Tag>
+          <Tag color="blue">{record.previousReading || 0}</Tag>
           <span>→</span>
-          <Tag color="green">{record.currentReading}</Tag>
+          <Tag color="green">{record.currentReading || 0}</Tag>
         </Space>
       ),
     },
@@ -251,11 +296,11 @@ const MeterReadings = () => {
       dataIndex: "unitsUsed",
       key: "unitsUsed",
       render: (units) => {
-        const status = getConsumptionStatus(units);
+        const status = getConsumptionStatus(units || 0);
         return (
           <Space>
             <Tag color={status.color} icon={status.icon}>
-              {units} units
+              {units || 0} units
             </Tag>
             <span style={{ fontSize: 12, color: "#8c8c8c" }}>
               {status.text}
@@ -271,7 +316,7 @@ const MeterReadings = () => {
       key: "amount",
       render: (amount) => (
         <span style={{ fontWeight: 600, color: "#1890ff" }}>
-          {formatCurrency(amount)}
+          {formatCurrency(amount || 0)}
         </span>
       ),
       sorter: (a, b) => (a.amount || 0) - (b.amount || 0),
@@ -280,8 +325,12 @@ const MeterReadings = () => {
       title: "Date",
       dataIndex: "readingDate",
       key: "readingDate",
-      render: (date) => formatDate(date),
-      sorter: (a, b) => new Date(a.readingDate) - new Date(b.readingDate),
+      render: (date) => (date ? formatDate(date) : "N/A"),
+      sorter: (a, b) => {
+        if (!a.readingDate) return 1;
+        if (!b.readingDate) return -1;
+        return new Date(a.readingDate) - new Date(b.readingDate);
+      },
     },
     {
       title: "Status",
@@ -297,7 +346,7 @@ const MeterReadings = () => {
     {
       title: "Actions",
       key: "actions",
-      width: 120,
+      width: 160,
       render: (_, record) => (
         <Space>
           <Tooltip title="View Details">
@@ -319,7 +368,7 @@ const MeterReadings = () => {
                 form.setFieldsValue({
                   ...record,
                   readingDate: record.readingDate
-                    ? require("dayjs")(record.readingDate)
+                    ? dayjs(record.readingDate)
                     : null,
                 });
                 setModalVisible(true);
@@ -343,8 +392,44 @@ const MeterReadings = () => {
     },
   ];
 
+  // Show message if no property selected
+  if (!currentPropertyId) {
+    return (
+      <div style={{ textAlign: "center", padding: "60px 20px" }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>💧</div>
+        <h2>Please select a property</h2>
+        <p style={{ color: "#8c8c8c" }}>
+          Use the property selector in the navbar to view water readings for a
+          specific property.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div>
+      {/* Property Header - Like ManageTenants */}
+      <Card
+        style={{
+          marginBottom: 24,
+          background: "linear-gradient(135deg, #1890ff 0%, #096dd9 100%)",
+          color: "white",
+        }}
+      >
+        <div>
+          <h2 style={{ color: "white", margin: 0 }}>
+            <HomeOutlined style={{ marginRight: 8 }} />
+            {activeProperty?.name || "No Property Selected"}
+          </h2>
+          <div style={{ color: "rgba(255,255,255,0.8)" }}>
+            {activeProperty?.address || ""}{" "}
+            {activeProperty?.city ? `• ${activeProperty.city}` : ""}
+            {activeProperty?.total_units
+              ? ` • ${activeProperty.total_units} units`
+              : ""}
+          </div>
+        </div>
+      </Card>
       {/* Stats Cards */}
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col xs={24} sm={12} lg={6}>
@@ -441,6 +526,9 @@ const MeterReadings = () => {
               Meter Readings
             </span>
             <Tag color="blue">{filteredReadings.length} records</Tag>
+            {activeProperty?.name && (
+              <Tag color="green">{activeProperty.name}</Tag>
+            )}
           </Space>
         }
         extra={
@@ -498,7 +586,7 @@ const MeterReadings = () => {
             <Option value="all">All Tenants</Option>
             {tenants.map((tenant) => (
               <Option key={tenant.id} value={tenant.id}>
-                {tenant.name} - {tenant.houseNo}
+                {tenant.name} - {tenant.houseNo || "N/A"}
               </Option>
             ))}
           </Select>
@@ -589,7 +677,7 @@ const MeterReadings = () => {
             >
               {tenants.map((tenant) => (
                 <Option key={tenant.id} value={tenant.id}>
-                  {tenant.name} - {tenant.houseNo}
+                  {tenant.name} - {tenant.houseNo || "N/A"}
                 </Option>
               ))}
             </Select>
@@ -615,6 +703,19 @@ const MeterReadings = () => {
             label="Current Reading"
             rules={[
               { required: true, message: "Please enter current reading" },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  const previous = getFieldValue("previousReading");
+                  if (value && previous && value <= previous) {
+                    return Promise.reject(
+                      new Error(
+                        "Current reading must be greater than previous",
+                      ),
+                    );
+                  }
+                  return Promise.resolve();
+                },
+              }),
             ]}
           >
             <Input
@@ -672,11 +773,20 @@ const MeterReadings = () => {
         }}
         footer={
           <Space>
+            {selectedReading?.status !== "billed" && (
+              <Button
+                type="primary"
+                icon={<FileTextOutlined />}
+                loading={generatingBill}
+                onClick={() => handleGenerateBill(selectedReading?.id)}
+              >
+                Generate Bill
+              </Button>
+            )}
             <Button icon={<PrinterOutlined />} onClick={() => window.print()}>
               Print
             </Button>
             <Button
-              type="primary"
               onClick={() => {
                 setDetailVisible(false);
                 setSelectedReading(null);
@@ -700,38 +810,38 @@ const MeterReadings = () => {
                   </Avatar>
                   <div>
                     <div style={{ fontWeight: 500 }}>
-                      {selectedReading.tenantName}
+                      {selectedReading.tenantName || "N/A"}
                     </div>
                     <div style={{ fontSize: 12, color: "#8c8c8c" }}>
                       <HomeOutlined style={{ marginRight: 4 }} />
-                      {selectedReading.houseNo}
+                      {selectedReading.houseNo || "N/A"}
                     </div>
                   </div>
                 </div>
               </Descriptions.Item>
               <Descriptions.Item label="Previous Reading">
                 <Tag color="blue" style={{ fontSize: 14 }}>
-                  {selectedReading.previousReading}
+                  {selectedReading.previousReading || 0}
                 </Tag>
               </Descriptions.Item>
               <Descriptions.Item label="Current Reading">
                 <Tag color="green" style={{ fontSize: 14 }}>
-                  {selectedReading.currentReading}
+                  {selectedReading.currentReading || 0}
                 </Tag>
               </Descriptions.Item>
               <Descriptions.Item label="Units Used">
                 <div>
                   <Tag
                     color={
-                      getConsumptionStatus(selectedReading.unitsUsed).color
+                      getConsumptionStatus(selectedReading.unitsUsed || 0).color
                     }
                     style={{ fontSize: 14, fontWeight: 600 }}
                   >
-                    {selectedReading.unitsUsed} units
+                    {selectedReading.unitsUsed || 0} units
                   </Tag>
                   <div style={{ marginTop: 4 }}>
                     Status:{" "}
-                    {getConsumptionStatus(selectedReading.unitsUsed).text}
+                    {getConsumptionStatus(selectedReading.unitsUsed || 0).text}
                   </div>
                 </div>
               </Descriptions.Item>
@@ -739,11 +849,13 @@ const MeterReadings = () => {
                 <span
                   style={{ fontSize: 18, fontWeight: 700, color: "#1890ff" }}
                 >
-                  {formatCurrency(selectedReading.amount)}
+                  {formatCurrency(selectedReading.amount || 0)}
                 </span>
               </Descriptions.Item>
               <Descriptions.Item label="Date">
-                {formatDate(selectedReading.readingDate)}
+                {selectedReading.readingDate
+                  ? formatDate(selectedReading.readingDate)
+                  : "N/A"}
               </Descriptions.Item>
               <Descriptions.Item label="Status">
                 <Badge
@@ -774,7 +886,7 @@ const MeterReadings = () => {
                   form.setFieldsValue({
                     ...selectedReading,
                     readingDate: selectedReading.readingDate
-                      ? require("dayjs")(selectedReading.readingDate)
+                      ? dayjs(selectedReading.readingDate)
                       : null,
                   });
                   setModalVisible(true);
@@ -782,13 +894,17 @@ const MeterReadings = () => {
               >
                 Edit Reading
               </Button>
-              <Button
-                icon={<FileTextOutlined />}
-                block
-                onClick={() => message.info("Generate bill coming soon")}
-              >
-                Generate Bill
-              </Button>
+              {selectedReading.status !== "billed" && (
+                <Button
+                  type="primary"
+                  icon={<FileTextOutlined />}
+                  block
+                  loading={generatingBill}
+                  onClick={() => handleGenerateBill(selectedReading.id)}
+                >
+                  Generate Bill
+                </Button>
+              )}
             </div>
           </div>
         )}

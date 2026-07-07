@@ -5,6 +5,7 @@ import { ConfigProvider, Layout } from "antd";
 import { AuthProvider } from "./context/AuthContext";
 import { PropertyProvider } from "./context/PropertyContext";
 import { useAuth } from "./hooks/useAuth";
+import { useProperty } from "./context/PropertyContext";
 import ProtectedRoute from "./components/Shared/ProtectedRoute";
 import Navbar from "./components/Shared/Navbar";
 
@@ -16,6 +17,7 @@ import AdminDashboard from "./pages/Admin/AdminDashboard";
 import CaretakerDashboard from "./pages/Caretaker/CaretakerDashboard";
 import ManageTenants from "./pages/Caretaker/ManageTenants";
 import MeterReadings from "./pages/Caretaker/MeterReadings";
+import TenantDetails from "./pages/Caretaker/TenantDetails";
 import Expenses from "./pages/Caretaker/Expenses";
 import Tenants from "./pages/Admin/Tenants";
 import Payments from "./pages/Admin/Payments";
@@ -26,8 +28,15 @@ const { Content } = Layout;
 
 const AppContent = () => {
   const { user, isLoading } = useAuth();
+  const { activeProperty } = useProperty();
   const { pathname } = window.location;
   const isAuthPage = pathname === "/login" || pathname === "/register";
+
+  console.log(
+    "🔑 AppContent - activeProperty:",
+    activeProperty?.id,
+    activeProperty?.name,
+  );
 
   if (isLoading) {
     return (
@@ -45,6 +54,9 @@ const AppContent = () => {
   }
 
   const showNavigation = !isAuthPage && user;
+  const tenantListKey = activeProperty?.id
+    ? `tenants-${activeProperty.id}`
+    : "tenants-none";
 
   return (
     <Layout style={{ minHeight: "100vh" }}>
@@ -80,10 +92,23 @@ const AppContent = () => {
                   element={<ProtectedRoute allowedRoles={["caretaker"]} />}
                 >
                   <Route path="/caretaker" element={<CaretakerDashboard />} />
+
+                  {/* IMPORTANT: Pass propertyId and propertyName as props */}
                   <Route
                     path="/caretaker/tenants"
-                    element={<ManageTenants />}
+                    element={
+                      <ManageTenants
+                        key={tenantListKey}
+                        propertyId={activeProperty?.id}
+                        propertyName={activeProperty?.name}
+                      />
+                    }
                   />
+                  <Route
+                    path="/caretaker/tenants/:id"
+                    element={<TenantDetails />}
+                  />
+
                   <Route
                     path="/caretaker/readings"
                     element={<MeterReadings />}

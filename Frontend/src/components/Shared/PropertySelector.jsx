@@ -29,6 +29,7 @@ const PropertySelector = () => {
     activeProperty,
     switchProperty,
     addProperty: addPropertyToContext,
+    fetchProperties, // Add this
   } = useProperty();
   const [modalVisible, setModalVisible] = useState(false);
   const [form] = Form.useForm();
@@ -75,7 +76,7 @@ const PropertySelector = () => {
           onChange={handlePropertyChange}
           style={{ width: 220 }}
           placeholder="Select Property"
-          dropdownMatchSelectWidth={300}
+          popupMatchSelectWidth={300}
           suffixIcon={<ApartmentOutlined />}
         >
           {properties.map((property) => (
@@ -110,6 +111,7 @@ const PropertySelector = () => {
             icon={<SwapOutlined />}
             size="small"
             onClick={() => {
+              fetchProperties();
               message.success("Properties refreshed");
             }}
           />
@@ -131,7 +133,7 @@ const PropertySelector = () => {
         }}
         footer={null}
         width={600}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={handleAddProperty}>
           <Form.Item

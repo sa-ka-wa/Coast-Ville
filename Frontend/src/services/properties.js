@@ -1,7 +1,6 @@
-// services/properties.js
 import api from "./api";
 
-// Mock data for multiple properties
+// Mock data (fallback only)
 let MOCK_PROPERTIES = [
   {
     id: 1,
@@ -44,90 +43,121 @@ let MOCK_PROPERTIES = [
   },
 ];
 
-// Get all properties
+// Get all properties - TRY REAL API FIRST
 export const getProperties = async () => {
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  return { data: MOCK_PROPERTIES };
+  try {
+    console.log("📡 Fetching properties from API...");
+    const response = await api.get("/properties");
+    console.log("✅ API Response:", response.data);
+    return response;
+  } catch (error) {
+    console.warn("⚠️ API failed, using mock data:", error.message);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return { data: MOCK_PROPERTIES };
+  }
 };
 
 // Get property by ID
 export const getProperty = async (id) => {
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  const property = MOCK_PROPERTIES.find((p) => p.id === id);
-  if (!property) throw new Error("Property not found");
-  return { data: property };
+  try {
+    const response = await api.get(`/properties/${id}`);
+    return response;
+  } catch (error) {
+    console.warn("⚠️ API failed, using mock data:", error.message);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const property = MOCK_PROPERTIES.find((p) => p.id === id);
+    if (!property) throw new Error("Property not found");
+    return { data: property };
+  }
 };
 
 // Add new property
 export const addProperty = async (propertyData) => {
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  const newProperty = {
-    id: Date.now(),
-    ...propertyData,
-    total_units: propertyData.total_units || 0,
-    status: "active",
-    created_at: new Date().toISOString(),
-  };
-  MOCK_PROPERTIES = [newProperty, ...MOCK_PROPERTIES];
-  return { data: newProperty };
+  try {
+    const response = await api.post("/properties", propertyData);
+    return response;
+  } catch (error) {
+    console.warn("⚠️ API failed, using mock data:", error.message);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const newProperty = {
+      id: Date.now(),
+      ...propertyData,
+      total_units: propertyData.total_units || 0,
+      status: "active",
+      created_at: new Date().toISOString(),
+    };
+    MOCK_PROPERTIES = [newProperty, ...MOCK_PROPERTIES];
+    return { data: newProperty };
+  }
 };
 
 // Update property
 export const updateProperty = async (id, propertyData) => {
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  const index = MOCK_PROPERTIES.findIndex((p) => p.id === id);
-  if (index === -1) throw new Error("Property not found");
-  MOCK_PROPERTIES[index] = { ...MOCK_PROPERTIES[index], ...propertyData };
-  return { data: MOCK_PROPERTIES[index] };
+  try {
+    const response = await api.put(`/properties/${id}`, propertyData);
+    return response;
+  } catch (error) {
+    console.warn("⚠️ API failed, using mock data:", error.message);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const index = MOCK_PROPERTIES.findIndex((p) => p.id === id);
+    if (index === -1) throw new Error("Property not found");
+    MOCK_PROPERTIES[index] = { ...MOCK_PROPERTIES[index], ...propertyData };
+    return { data: MOCK_PROPERTIES[index] };
+  }
 };
 
 // Delete property
 export const deleteProperty = async (id) => {
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  MOCK_PROPERTIES = MOCK_PROPERTIES.filter((p) => p.id !== id);
-  return { data: { message: "Property deleted successfully" } };
+  try {
+    const response = await api.delete(`/properties/${id}`);
+    return response;
+  } catch (error) {
+    console.warn("⚠️ API failed, using mock data:", error.message);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    MOCK_PROPERTIES = MOCK_PROPERTIES.filter((p) => p.id !== id);
+    return { data: { message: "Property deleted successfully" } };
+  }
 };
 
 // Get property stats
 export const getPropertyStats = async (propertyId) => {
-  await new Promise((resolve) => setTimeout(resolve, 400));
-  // Return different stats based on property
-  const statsMap = {
-    1: {
-      totalUnits: 48,
-      occupied: 44,
-      vacant: 4,
-      expectedRent: 720000,
-      collected: 650000,
-      balance: 70000,
-    },
-    2: {
-      totalUnits: 24,
-      occupied: 20,
-      vacant: 4,
-      expectedRent: 360000,
-      collected: 320000,
-      balance: 40000,
-    },
-    3: {
-      totalUnits: 36,
-      occupied: 30,
-      vacant: 6,
-      expectedRent: 540000,
-      collected: 480000,
-      balance: 60000,
-    },
-  };
-  return { data: statsMap[propertyId] || statsMap[1] };
+  try {
+    const response = await api.get(`/properties/${propertyId}/stats`);
+    return response;
+  } catch (error) {
+    console.warn("⚠️ API failed, using mock data:", error.message);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const statsMap = {
+      1: {
+        totalUnits: 48,
+        occupied: 44,
+        vacant: 4,
+        expectedRent: 720000,
+        collected: 650000,
+        balance: 70000,
+      },
+      2: {
+        totalUnits: 24,
+        occupied: 20,
+        vacant: 4,
+        expectedRent: 360000,
+        collected: 320000,
+        balance: 40000,
+      },
+      3: {
+        totalUnits: 36,
+        occupied: 30,
+        vacant: 6,
+        expectedRent: 540000,
+        collected: 480000,
+        balance: 60000,
+      },
+    };
+    return { data: statsMap[propertyId] || statsMap[1] };
+  }
 };
 
-// Set active property (API call)
-export const setActiveProperty = async (propertyId) => {
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  return { data: { message: "Property switched successfully" } };
-};
-
-// Export all as default
+// Export all as default - REMOVED setActiveProperty
 const propertiesService = {
   getProperties,
   getProperty,
@@ -135,7 +165,6 @@ const propertiesService = {
   updateProperty,
   deleteProperty,
   getPropertyStats,
-  setActiveProperty,
 };
 
 export default propertiesService;

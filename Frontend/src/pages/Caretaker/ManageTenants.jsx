@@ -19,14 +19,10 @@ import {
   Avatar,
   Badge,
   Empty,
-  Tabs,
   Descriptions,
-  DatePicker,
-  Upload,
-  Progress,
-  Alert,
-  Switch,
   Divider,
+  Spin,
+  Alert,
 } from "antd";
 import {
   PlusOutlined,
@@ -38,22 +34,15 @@ import {
   PhoneOutlined,
   HomeOutlined,
   DollarOutlined,
-  CalendarOutlined,
-  ExportOutlined,
-  ImportOutlined,
-  FileTextOutlined,
-  EyeOutlined,
-  MessageOutlined,
-  MailOutlined,
-  WhatsAppOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  ClockCircleOutlined,
-  BarChartOutlined,
   TeamOutlined,
   ApartmentOutlined,
   WalletOutlined,
+  WhatsAppOutlined,
+  MailOutlined,
+  EyeOutlined,
+  MessageOutlined,
 } from "@ant-design/icons";
+import { useNavigate } from "react-router-dom"; // ← ADD THIS IMPORT
 import {
   getTenants,
   addTenant,
@@ -66,12 +55,22 @@ import {
   getStatusColor,
   getStatusLabel,
 } from "../../utils/formatters";
+import { useProperty } from "../../context/PropertyContext";
+import { getUnits, updateUnitStatus } from "../../services/units";
 
 const { Option } = Select;
-const { TabPane } = Tabs;
 const { TextArea } = Input;
 
-const ManageTenants = () => {
+const ManageTenants = ({ propertyId, propertyName }) => {
+  const navigate = useNavigate(); // ← ADD THIS
+
+  console.log(
+    "🔍🔍🔍 ManageTenants PROPS - propertyId:",
+    propertyId,
+    "propertyName:",
+    propertyName,
+  );
+  const { activeProperty } = useProperty();
   const [loading, setLoading] = useState(false);
   const [tenants, setTenants] = useState([]);
   const [filteredTenants, setFilteredTenants] = useState([]);
@@ -82,7 +81,10 @@ const ManageTenants = () => {
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [form] = Form.useForm();
-  const [activeTab, setActiveTab] = useState("list");
+
+  // State for units
+  const [units, setUnits] = useState([]);
+  const [loadingUnits, setLoadingUnits] = useState(false);
 
   // Stats
   const [stats, setStats] = useState({
@@ -95,19 +97,73 @@ const ManageTenants = () => {
     outstanding: 0,
   });
 
-  useEffect(() => {
-    fetchTenants();
-  }, []);
+  // Use the prop if provided, otherwise use context
+  const currentPropertyId = propertyId || activeProperty?.id;
+  const currentPropertyName = propertyName || activeProperty?.name;
 
-  const fetchTenants = async () => {
+  console.log(
+    "🔄 ManageTenants - Current Property ID:",
+    currentPropertyId,
+    "Name:",
+    currentPropertyName,
+  );
+
+  // Fetch tenants when property ID changes
+  useEffect(() => {
+    if (currentPropertyId) {
+      fetchTenants(currentPropertyId);
+      fetchUnits();
+    } else {
+      setTenants([]);
+      setFilteredTenants([]);
+      setUnits([]);
+      setStats({
+        total: 0,
+        active: 0,
+        vacating: 0,
+        vacated: 0,
+        totalRent: 0,
+        collected: 0,
+        outstanding: 0,
+      });
+    }
+  }, [currentPropertyId]);
+
+  // Fetch units
+  const fetchUnits = async () => {
+    setLoadingUnits(true);
+    try {
+      const response = await getUnits({ property_id: currentPropertyId });
+      const availableUnits = response.data.filter(
+        (u) =>
+          u.status === "available" ||
+          (editingTenant && u.id === editingTenant.unit_id),
+      );
+      setUnits(availableUnits);
+    } catch (error) {
+      message.error("Failed to fetch units");
+      console.error("Error fetching units:", error);
+    } finally {
+      setLoadingUnits(false);
+    }
+  };
+
+  const fetchTenants = async (id) => {
     setLoading(true);
     try {
-      const response = await getTenants();
+      const filters = {};
+      if (id) {
+        filters.property_id = id;
+      }
+      console.log("📡 Fetching tenants with filters:", filters);
+      const response = await getTenants(filters);
+      console.log("✅ Tenants received:", response.data.length);
       setTenants(response.data);
       setFilteredTenants(response.data);
       calculateStats(response.data);
     } catch (error) {
       message.error("Failed to fetch tenants");
+      console.error("Error fetching tenants:", error);
     } finally {
       setLoading(false);
     }
@@ -135,17 +191,23 @@ const ManageTenants = () => {
 
   const handleAddEdit = async (values) => {
     try {
+      const tenantData = {
+        ...values,
+        property_id: currentPropertyId,
+      };
+
       if (editingTenant) {
-        await updateTenant(editingTenant.id, values);
+        await updateTenant(editingTenant.id, tenantData);
         message.success("Tenant updated successfully");
       } else {
-        await addTenant(values);
+        await addTenant(tenantData);
         message.success("Tenant added successfully");
       }
       setModalVisible(false);
       setEditingTenant(null);
       form.resetFields();
-      fetchTenants();
+      fetchTenants(currentPropertyId);
+      fetchUnits();
     } catch (error) {
       message.error("Operation failed");
     }
@@ -155,7 +217,8 @@ const ManageTenants = () => {
     try {
       await deleteTenant(id);
       message.success("Tenant deleted successfully");
-      fetchTenants();
+      fetchTenants(currentPropertyId);
+      fetchUnits();
     } catch (error) {
       message.error("Failed to delete tenant");
     }
@@ -168,9 +231,9 @@ const ManageTenants = () => {
       const search = searchText.toLowerCase();
       filtered = filtered.filter(
         (t) =>
-          t.name.toLowerCase().includes(search) ||
-          t.houseNo.toLowerCase().includes(search) ||
-          t.phone.includes(search),
+          t.name?.toLowerCase().includes(search) ||
+          t.houseNo?.toLowerCase().includes(search) ||
+          t.phone?.includes(search),
       );
     }
 
@@ -189,7 +252,7 @@ const ManageTenants = () => {
 
   useEffect(() => {
     handleSearch();
-  }, [searchText, statusFilter]);
+  }, [searchText, statusFilter, tenants]);
 
   const handleSendMessage = (tenant) => {
     message.success(`Opening chat with ${tenant.name}`);
@@ -231,9 +294,9 @@ const ManageTenants = () => {
       dataIndex: "houseNo",
       key: "houseNo",
       width: 100,
-      render: (text) => (
+      render: (text, record) => (
         <Tag color="blue" style={{ fontWeight: 500 }}>
-          {text}
+          {text || record.unit?.unit_number || "N/A"}
         </Tag>
       ),
     },
@@ -244,7 +307,7 @@ const ManageTenants = () => {
       width: 120,
       render: (rent) => (
         <span style={{ fontWeight: 600, color: "#1890ff" }}>
-          {formatCurrency(rent)}
+          {formatCurrency(rent || 0)}
         </span>
       ),
     },
@@ -265,6 +328,13 @@ const ManageTenants = () => {
       ),
     },
     {
+      title: "Move In",
+      dataIndex: "moveInDate",
+      key: "moveInDate",
+      width: 120,
+      render: (date) => (date ? formatDate(date) : "N/A"),
+    },
+    {
       title: "Status",
       dataIndex: "status",
       key: "status",
@@ -283,7 +353,7 @@ const ManageTenants = () => {
             <Button
               icon={<EyeOutlined />}
               size="small"
-              onClick={() => handleViewDetails(record)}
+              onClick={() => navigate(`/caretaker/tenants/${record.id}`)} // ← UPDATED
             />
           </Tooltip>
           <Tooltip title="Edit">
@@ -321,8 +391,55 @@ const ManageTenants = () => {
     },
   ];
 
+  // Show loading if no property is selected
+  if (!currentPropertyId) {
+    return (
+      <div style={{ textAlign: "center", padding: "60px 20px" }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>🏠</div>
+        <h2>Please select a property</h2>
+        <p style={{ color: "#8c8c8c" }}>
+          Use the property selector in the navbar to view tenants for a specific
+          property.
+        </p>
+      </div>
+    );
+  }
+
+  // Show loading state while fetching
+  if (loading && tenants.length === 0) {
+    return (
+      <div style={{ textAlign: "center", padding: "40px" }}>
+        <Spin size="large" />
+        <p style={{ marginTop: 16 }}>Loading tenants...</p>
+      </div>
+    );
+  }
+
   return (
     <div>
+      {/* Property Header */}
+      <Card
+        style={{
+          marginBottom: 24,
+          background: "linear-gradient(135deg, #1890ff 0%, #096dd9 100%)",
+          color: "white",
+        }}
+      >
+        <div>
+          <h2 style={{ color: "white", margin: 0 }}>
+            <HomeOutlined style={{ marginRight: 8 }} />
+            {currentPropertyName || "No Property Selected"}
+          </h2>
+          <div style={{ color: "rgba(255,255,255,0.8)" }}>
+            {activeProperty?.address || ""}{" "}
+            {activeProperty?.city ? `• ${activeProperty.city}` : ""}
+            {activeProperty?.total_units
+              ? ` • ${activeProperty.total_units} units`
+              : ""}
+          </div>
+        </div>
+      </Card>
+
       {/* Stats Cards */}
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col xs={24} sm={12} lg={6}>
@@ -378,28 +495,19 @@ const ManageTenants = () => {
               Manage Tenants
             </span>
             <Tag color="blue">{filteredTenants.length} tenants</Tag>
+            {currentPropertyName && (
+              <Tag color="green">{currentPropertyName}</Tag>
+            )}
           </Space>
         }
         extra={
           <Space>
             <Button
               icon={<ReloadOutlined />}
-              onClick={fetchTenants}
+              onClick={() => fetchTenants(currentPropertyId)}
               loading={loading}
             >
               Refresh
-            </Button>
-            <Button
-              icon={<WhatsAppOutlined />}
-              onClick={() => message.info("WhatsApp integration coming soon")}
-            >
-              Broadcast
-            </Button>
-            <Button
-              icon={<ExportOutlined />}
-              onClick={() => message.info("Export feature coming soon")}
-            >
-              Export
             </Button>
             <Button
               type="primary"
@@ -464,7 +572,7 @@ const ManageTenants = () => {
           locale={{
             emptyText: (
               <Empty
-                description="No tenants found. Add your first tenant!"
+                description="No tenants found for this property"
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
               />
             ),
@@ -497,24 +605,25 @@ const ManageTenants = () => {
         }}
         footer={null}
         width={600}
-        destroyOnClose
+        destroyOnHidden
       >
+        <Alert
+          message="Tenant Information"
+          description={`Adding tenant to: ${currentPropertyName || "Selected Property"}`}
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+
         <Form
           form={form}
           layout="vertical"
           onFinish={handleAddEdit}
           initialValues={{
             status: "active",
+            property_id: currentPropertyId,
           }}
         >
-          <Alert
-            message="Tenant Information"
-            description="Fill in the tenant details below. All fields marked with * are required."
-            type="info"
-            showIcon
-            style={{ marginBottom: 16 }}
-          />
-
           <Row gutter={16}>
             <Col span={24}>
               <Form.Item
@@ -555,17 +664,47 @@ const ManageTenants = () => {
             </Col>
             <Col span={12}>
               <Form.Item
-                name="houseNo"
-                label="House Number"
-                rules={[
-                  { required: true, message: "Please enter house number" },
-                ]}
+                name="unit_id"
+                label="Unit / House Number"
+                rules={[{ required: true, message: "Please select a unit" }]}
+                tooltip="Select the unit/house number for this tenant"
               >
-                <Input
-                  prefix={<HomeOutlined />}
-                  placeholder="A03"
+                <Select
+                  placeholder="Select unit"
                   size="large"
-                />
+                  loading={loadingUnits}
+                  showSearch
+                  optionFilterProp="children"
+                  notFoundContent={
+                    loadingUnits ? <Spin size="small" /> : "No available units"
+                  }
+                >
+                  {units.map((unit) => (
+                    <Option key={unit.id} value={unit.id}>
+                      <Space>
+                        <HomeOutlined />
+                        <span style={{ fontWeight: 500 }}>
+                          {unit.unit_number}
+                        </span>
+                        <Tag
+                          color={
+                            unit.status === "available" ? "green" : "orange"
+                          }
+                        >
+                          {unit.status}
+                        </Tag>
+                        {unit.unit_type && (
+                          <Tag color="blue">{unit.unit_type}</Tag>
+                        )}
+                        {unit.monthly_rent && (
+                          <span style={{ fontSize: 12, color: "#8c8c8c" }}>
+                            Ksh {unit.monthly_rent.toLocaleString()}
+                          </span>
+                        )}
+                      </Space>
+                    </Option>
+                  ))}
+                </Select>
               </Form.Item>
             </Col>
           </Row>
@@ -601,22 +740,12 @@ const ManageTenants = () => {
 
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item
-                name="moveInDate"
-                label="Move In Date"
-                rules={[
-                  { required: true, message: "Please select move in date" },
-                ]}
-              >
+              <Form.Item name="moveInDate" label="Move In Date">
                 <Input type="date" size="large" />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item
-                name="status"
-                label="Status"
-                rules={[{ required: true }]}
-              >
+              <Form.Item name="status" label="Status">
                 <Select size="large">
                   <Option value="active">Active</Option>
                   <Option value="vacating">Vacating</Option>
@@ -710,16 +839,20 @@ const ManageTenants = () => {
 
             <Descriptions bordered column={1}>
               <Descriptions.Item label="House Number">
-                <Tag color="blue">{selectedTenant.houseNo}</Tag>
+                <Tag color="blue">
+                  {selectedTenant.houseNo ||
+                    selectedTenant.unit?.unit_number ||
+                    "N/A"}
+                </Tag>
               </Descriptions.Item>
               <Descriptions.Item label="Phone">
                 <a href={`tel:${selectedTenant.phone}`}>
-                  {selectedTenant.phone}
+                  {selectedTenant.phone || "N/A"}
                 </a>
               </Descriptions.Item>
               <Descriptions.Item label="Monthly Rent">
                 <span style={{ fontWeight: 600, color: "#1890ff" }}>
-                  {formatCurrency(selectedTenant.monthlyRent)}
+                  {formatCurrency(selectedTenant.monthlyRent || 0)}
                 </span>
               </Descriptions.Item>
               <Descriptions.Item label="Deposit">
@@ -736,7 +869,9 @@ const ManageTenants = () => {
                 </span>
               </Descriptions.Item>
               <Descriptions.Item label="Move In Date">
-                {formatDate(selectedTenant.moveInDate)}
+                {selectedTenant.moveInDate
+                  ? formatDate(selectedTenant.moveInDate)
+                  : "N/A"}
               </Descriptions.Item>
               {selectedTenant.moveOutDate && (
                 <Descriptions.Item label="Move Out Date">

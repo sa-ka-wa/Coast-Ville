@@ -1,6 +1,6 @@
 // context/PropertyContext.jsx
 import React, { createContext, useState, useContext, useEffect } from "react";
-import { getProperties, setActiveProperty } from "../services/properties";
+import { getProperties } from "../services/properties"; // Remove setActiveProperty
 
 const PropertyContext = createContext();
 
@@ -56,8 +56,7 @@ export const PropertyProvider = ({ children }) => {
       if (property) {
         setActivePropertyState(property);
         localStorage.setItem("activePropertyId", propertyId);
-        // You can also update the API context if needed
-        await setActiveProperty(propertyId);
+        console.log(`🔄 Switched to: ${property.name}`);
         return { success: true, property };
       }
       return { success: false, error: "Property not found" };
@@ -89,7 +88,6 @@ export const PropertyProvider = ({ children }) => {
     switchProperty,
     addProperty,
     updateProperty,
-    setActiveProperty: setActivePropertyState,
   };
 
   return (

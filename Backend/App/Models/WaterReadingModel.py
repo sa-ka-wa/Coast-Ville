@@ -8,7 +8,6 @@ class WaterReading(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'))
-
     previous_reading = db.Column(db.Float)
     current_reading = db.Column(db.Float)
     units_used = db.Column(db.Float)
@@ -16,23 +15,29 @@ class WaterReading(db.Model):
     amount = db.Column(db.Float)
     reading_date = db.Column(db.Date)
     notes = db.Column(db.Text)
-    status = db.Column(db.String(20), default='pending')
-
+    status = db.Column(db.String(50), default='pending')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    tenant = db.relationship('Tenant', backref='water_readings')
 
     def to_dict(self):
         return {
             'id': self.id,
             'tenant_id': self.tenant_id,
-            'tenantName': self.tenant.name if self.tenant else None,
-            'houseNo': self.tenant.unit.unit_number if self.tenant and self.tenant.unit else None,
-            'previousReading': self.previous_reading,
-            'currentReading': self.current_reading,
-            'unitsUsed': self.units_used,
+            'tenant_name': self.tenant.name if self.tenant else None,
+            'house_no': self.tenant.house_no if self.tenant else None,
+            'previous_reading': self.previous_reading,
+            'current_reading': self.current_reading,
+            'units_used': self.units_used,
             'rate': self.rate,
             'amount': self.amount,
-            'readingDate': self.reading_date.isoformat() if self.reading_date else None,
-            'status': self.status
+            'reading_date': self.reading_date.isoformat() if self.reading_date else None,
+            'notes': self.notes,
+            'status': self.status,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
 
 
