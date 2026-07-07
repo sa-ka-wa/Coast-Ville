@@ -48,9 +48,9 @@ import {
   getPaymentHistory,
   confirmPayment,
   initiateSTKPush,
-  getPropertyStats,
   getPaymentSummary,
 } from "../../services/payments";
+import { getPropertyStats } from "../../services/properties";
 import { getTenants } from "../../services/tenants";
 import {
   formatCurrency,

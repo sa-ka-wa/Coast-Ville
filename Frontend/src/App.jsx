@@ -19,8 +19,9 @@ import ManageTenants from "./pages/Caretaker/ManageTenants";
 import MeterReadings from "./pages/Caretaker/MeterReadings";
 import TenantDetails from "./pages/Caretaker/TenantDetails";
 import Expenses from "./pages/Caretaker/Expenses";
+import CaretakerPayments from "./pages/Caretaker/Payments";
 import Tenants from "./pages/Admin/Tenants";
-import Payments from "./pages/Admin/Payments";
+import AdminPayments from "./pages/Admin/Payments";
 import WaterBills from "./pages/Admin/WaterBills";
 import Reports from "./pages/Admin/Reports";
 
@@ -83,7 +84,7 @@ const AppContent = () => {
                 <Route element={<ProtectedRoute allowedRoles={["admin"]} />}>
                   <Route path="/admin" element={<AdminDashboard />} />
                   <Route path="/admin/tenants" element={<Tenants />} />
-                  <Route path="/admin/payments" element={<Payments />} />
+                  <Route path="/admin/payments" element={<AdminPayments />} />
                   <Route path="/admin/water" element={<WaterBills />} />
                   <Route path="/admin/reports" element={<Reports />} />
                 </Route>
@@ -114,6 +115,10 @@ const AppContent = () => {
                     element={<MeterReadings />}
                   />
                   <Route path="/caretaker/expenses" element={<Expenses />} />
+                  <Route
+                    path="/caretaker/payments"
+                    element={<CaretakerPayments />}
+                  />
                 </Route>
 
                 <Route

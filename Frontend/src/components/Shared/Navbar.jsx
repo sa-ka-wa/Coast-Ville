@@ -10,6 +10,7 @@ import {
   LogoutOutlined,
   SettingOutlined,
   ScheduleOutlined,
+  WalletOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
@@ -67,6 +68,11 @@ const Navbar = () => {
           key: "/caretaker/readings",
           icon: <ScheduleOutlined />,
           label: "Meter Readings",
+        },
+        {
+          key: "/caretaker/payments",
+          icon: <WalletOutlined />,
+          label: "Payments",
         },
         {
           key: "/caretaker/expenses",

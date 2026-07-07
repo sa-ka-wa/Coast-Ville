@@ -1,3 +1,4 @@
+// services/properties.js
 import api from "./api";
 
 // Mock data (fallback only)
@@ -119,14 +120,35 @@ export const deleteProperty = async (id) => {
   }
 };
 
-// Get property stats
+// Get property stats - with proper undefined handling
 export const getPropertyStats = async (propertyId) => {
+  // If no propertyId is provided, return mock data for first property
+  if (!propertyId) {
+    console.warn("⚠️ No propertyId provided, using mock data for property 1");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return {
+      data: {
+        totalUnits: 48,
+        occupied: 44,
+        vacant: 4,
+        expectedRent: 720000,
+        collected: 650000,
+        balance: 70000,
+      },
+    };
+  }
+
   try {
     const response = await api.get(`/properties/${propertyId}/stats`);
     return response;
   } catch (error) {
-    console.warn("⚠️ API failed, using mock data:", error.message);
+    console.warn(
+      `⚠️ API failed for property ${propertyId}, using mock data:`,
+      error.message,
+    );
     await new Promise((resolve) => setTimeout(resolve, 400));
+
+    // Mock stats for different properties
     const statsMap = {
       1: {
         totalUnits: 48,
@@ -153,11 +175,13 @@ export const getPropertyStats = async (propertyId) => {
         balance: 60000,
       },
     };
+
+    // Return mock stats for the requested property or default to property 1
     return { data: statsMap[propertyId] || statsMap[1] };
   }
 };
 
-// Export all as default - REMOVED setActiveProperty
+// Export all as default
 const propertiesService = {
   getProperties,
   getProperty,
