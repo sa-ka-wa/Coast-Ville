@@ -4,7 +4,8 @@ from App.Controllers.PaymentController import PaymentController
 from App.Controllers.TenantController import TenantController
 from App.Controllers.PropertyController import PropertyController
 from App.Controllers.UnitController import UnitController
-from App.Controllers.WaterController import WaterController  # ← ADD THIS IMPORT
+from App.Controllers.WaterController import WaterController
+from datetime import datetime
 
 api_bp = Blueprint('api', __name__)
 
@@ -295,3 +296,93 @@ def list_routes():
             'path': str(rule)
         })
     return jsonify(routes), 200
+
+# ============================================================
+# SCHEDULER ROUTES (UNIQUE - NO DUPLICATES)
+# ============================================================
+
+@api_bp.route('/scheduler/run-monthly', methods=['POST'])
+@jwt_required()
+def scheduler_run_monthly():
+    """Manually trigger monthly tasks (rent, water bills, overdue checks)"""
+    from App.Services.SchedulerService import SchedulerService
+    try:
+        result = SchedulerService.run_monthly_tasks()
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@api_bp.route('/scheduler/check-overdue', methods=['GET'])
+@jwt_required()
+def scheduler_check_overdue():
+    """Check for overdue payments and send reminders"""
+    from App.Services.SchedulerService import SchedulerService
+    try:
+        result = SchedulerService.check_overdue_payments()
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@api_bp.route('/scheduler/send-reading-reminders', methods=['POST'])
+@jwt_required()
+def scheduler_send_reading_reminders():
+    """Send reading reminders to caretakers"""
+    from App.Services.SchedulerService import SchedulerService
+    try:
+        result = SchedulerService.send_reading_reminders_to_caretakers()
+        return jsonify({'status': 'success', 'notified': result}), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@api_bp.route('/scheduler/generate-water-bills', methods=['POST'])
+@jwt_required()
+def scheduler_generate_water_bills():
+    """Generate water bills from readings taken by caretakers"""
+    from App.Services.SchedulerService import SchedulerService
+    try:
+        result = SchedulerService.generate_monthly_water_bills()
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@api_bp.route('/scheduler/generate-estimated-bills', methods=['POST'])
+@jwt_required()
+def scheduler_generate_estimated_bills():
+    """Generate estimated water bills for tenants without readings"""
+    from App.Services.SchedulerService import SchedulerService
+    try:
+        result = SchedulerService.generate_estimated_water_bills()
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@api_bp.route('/scheduler/status', methods=['GET'])
+@jwt_required()
+def scheduler_status():
+    """Get scheduler status and current date information"""
+    today = datetime.now().date()
+    return jsonify({
+        'today': today.isoformat(),
+        'is_first_of_month': today.day == 1,
+        'is_after_5th': today.day >= 5,
+        'is_23rd': today.day == 23,
+        'is_25th': today.day >= 25 and today.day <= 28,
+        'is_30th': today.day >= 30,
+        'month': today.strftime('%B %Y'),
+        'day': today.day,
+        'day_name': today.strftime('%A')
+    }), 200
+@api_bp.route('/scheduler/send-statements', methods=['POST'])
+@jwt_required()
+def scheduler_send_statements():
+    """Manually send monthly statements to all tenants"""
+    from App.Services.SchedulerService import SchedulerService
+    try:
+        result = SchedulerService.send_monthly_statements()
+        return jsonify({
+            'status': 'success',
+            'sent': result,
+            'message': f'Monthly statements sent to {result} tenants'
+        }), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500

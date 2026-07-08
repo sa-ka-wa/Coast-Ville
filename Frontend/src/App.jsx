@@ -8,6 +8,7 @@ import { useAuth } from "./hooks/useAuth";
 import { useProperty } from "./context/PropertyContext";
 import ProtectedRoute from "./components/Shared/ProtectedRoute";
 import Navbar from "./components/Shared/Navbar";
+import AppInstallBanner from "./components/Shared/AppInstallBanner"; // ← ADD THIS
 
 // Pages
 import Login from "./pages/Login";
@@ -24,6 +25,7 @@ import Tenants from "./pages/Admin/Tenants";
 import AdminPayments from "./pages/Admin/Payments";
 import WaterBills from "./pages/Admin/WaterBills";
 import Reports from "./pages/Admin/Reports";
+import MobileDashboard from "./pages/Caretaker/MobileDashboard";
 
 const { Content } = Layout;
 
@@ -62,6 +64,8 @@ const AppContent = () => {
   return (
     <Layout style={{ minHeight: "100vh" }}>
       {showNavigation && <Navbar />}
+      {/* Add the install banner */}
+      <AppInstallBanner />
       <Layout>
         <Layout
           style={{
@@ -92,9 +96,12 @@ const AppContent = () => {
                 <Route
                   element={<ProtectedRoute allowedRoles={["caretaker"]} />}
                 >
-                  <Route path="/caretaker" element={<CaretakerDashboard />} />
-
-                  {/* IMPORTANT: Pass propertyId and propertyName as props */}
+                  {/* Mobile Dashboard as default caretaker page */}
+                  <Route path="/caretaker" element={<MobileDashboard />} />
+                  <Route
+                    path="/caretaker/dashboard"
+                    element={<MobileDashboard />}
+                  />
                   <Route
                     path="/caretaker/tenants"
                     element={
@@ -109,7 +116,6 @@ const AppContent = () => {
                     path="/caretaker/tenants/:id"
                     element={<TenantDetails />}
                   />
-
                   <Route
                     path="/caretaker/readings"
                     element={<MeterReadings />}

@@ -422,3 +422,80 @@ class WaterController:
             import traceback
             traceback.print_exc()
             return jsonify({'error': str(e)}), 500
+
+        # Backend/App/Controllers/WaterController.py - Add quick entry method
+
+        @staticmethod
+        @jwt_required()
+        def quick_enter_readings():
+            """Quick water reading entry - enter multiple readings at once"""
+            try:
+                data = request.json
+                readings = data.get('readings', [])
+                property_id = data.get('property_id')
+
+                # Get user from token
+                current_user_id = get_jwt_identity()
+                user = User.query.get(current_user_id)
+
+                results = []
+                errors = []
+
+                for reading_data in readings:
+                    try:
+                        tenant_id = reading_data.get('tenant_id')
+                        previous = reading_data.get('previous_reading', 0)
+                        current = reading_data.get('current_reading', 0)
+
+                        # Verify tenant exists and belongs to property
+                        tenant = Tenant.query.get(tenant_id)
+                        if not tenant:
+                            errors.append(f"Tenant {tenant_id} not found")
+                            continue
+
+                        if property_id and tenant.property_id != property_id:
+                            errors.append(f"Tenant {tenant.name} not in property")
+                            continue
+
+                        # Calculate values
+                        units_used = current - previous
+                        rate = reading_data.get('rate', 70)
+                        amount = units_used * rate
+
+                        reading = WaterReading(
+                            tenant_id=tenant_id,
+                            previous_reading=previous,
+                            current_reading=current,
+                            units_used=units_used,
+                            rate=rate,
+                            amount=amount,
+                            reading_date=datetime.strptime(reading_data.get('reading_date'),
+                                                           '%Y-%m-%d').date() if reading_data.get(
+                                'reading_date') else datetime.now().date(),
+                            notes=reading_data.get('notes', 'Quick entry'),
+                            status='pending'
+                        )
+
+                        db.session.add(reading)
+                        results.append({
+                            'tenant_id': tenant_id,
+                            'tenant_name': tenant.name,
+                            'units_used': units_used,
+                            'amount': amount
+                        })
+
+                    except Exception as e:
+                        errors.append(str(e))
+
+                db.session.commit()
+
+                return jsonify({
+                    'message': f'Added {len(results)} readings',
+                    'results': results,
+                    'errors': errors
+                }), 201
+
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"Quick entry failed: {str(e)}")
+                return jsonify({'error': str(e)}), 500

@@ -1,0 +1,23 @@
+# ngrok.yml - RentManager Configuration
+version: "2"
+authtoken: YOUR_NGROK_TOKEN_HERE  # Replace with your token from https://dashboard.ngrok.com/auth
+region: eu  # Options: us, eu, ap, au, sa, jp, in
+
+tunnels:
+  rentmanager:
+    proto: http
+    addr: 5173
+    inspect: true
+    # hostname: rentmanager.ngrok.io  # Uncomment only for paid accounts
+    request_header:
+      add:
+        - "X-Forwarded-For: $remote_addr"
+        - "X-Forwarded-Proto: $scheme"
+        - "X-Forwarded-Host: rentmanager.ngrok.io"
+    response_header:
+      add:
+        - "Access-Control-Allow-Origin: *"
+        - "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS"
+        - "Access-Control-Allow-Headers: Content-Type, Authorization"
+    bind_tls: true
+    host_header: rewrite
