@@ -1,4 +1,4 @@
-# Core Flask
+# Core
 Flask==2.3.3
 Werkzeug==2.3.8
 Jinja2==3.1.4
@@ -7,24 +7,24 @@ itsdangerous==2.2.0
 MarkupSafe==2.1.5
 blinker==1.8.2
 
-# Database - Compatible versions
+# Database
 Flask-SQLAlchemy==3.0.5
 SQLAlchemy==2.0.29
 psycopg2-binary==2.9.9
 Flask-Migrate==4.0.5
 alembic==1.12.1
 
-# Serialization - Using compatible versions
+# Serialization
 marshmallow==3.20.2
 flask-marshmallow==0.14.0
 marshmallow-sqlalchemy==0.29.0
 sqlalchemy-serializer==1.4.22
 
-# Environment and CORS
+# Environment & CORS
 python-dotenv==1.0.0
 Flask-Cors==4.0.0
 
-# Authentication
+# Auth
 Flask-JWT-Extended==4.5.3
 PyJWT==2.8.0
 Flask-Bcrypt==1.0.1
@@ -39,16 +39,16 @@ charset-normalizer==3.3.2
 six==1.16.0
 python-dateutil==2.8.2
 
-# PDF and Images
+# PDF & Images
 fpdf2==2.7.7
 pillow==10.2.0
 fonttools==4.47.2
 
-# Session Management
+# Session
 Flask-Session==0.5.0
 cachelib==0.10.2
 
-# Production Server
+# Production
 gunicorn==21.2.0
 
 # Testing
@@ -67,13 +67,13 @@ Faker==20.1.0
 africastalking==2.0.0
 twilio==8.10.0
 
-# Scheduling
+# Scheduling - FIXED VERSION
 APScheduler==3.10.4
 tzlocal==5.2
-pytz==2023.3.post1
+pytz==2024.1  # ← Updated to satisfy sqlalchemy-serializer
 tzdata==2023.4
 
-# Async HTTP (Simplified)
+# Async HTTP
 aiohttp==3.9.1
 aiohttp-retry==2.8.3
 aiohappyeyeballs==2.3.2
