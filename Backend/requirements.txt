@@ -58,7 +58,7 @@ iniconfig==2.0.0
 tomli==2.0.1
 exceptiongroup==1.2.0
 packaging==23.2
-responses==0.25.0
+responses==0.25.8  # ← Updated to satisfy africastalking
 
 # Development
 Faker==20.1.0
@@ -67,10 +67,10 @@ Faker==20.1.0
 africastalking==2.0.0
 twilio==8.10.0
 
-# Scheduling - FIXED VERSION
+# Scheduling
 APScheduler==3.10.4
 tzlocal==5.2
-pytz==2024.1  # ← Updated to satisfy sqlalchemy-serializer
+pytz==2024.1
 tzdata==2023.4
 
 # Async HTTP
