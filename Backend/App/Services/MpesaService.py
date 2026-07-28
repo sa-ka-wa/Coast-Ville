@@ -5,6 +5,10 @@ import base64
 from datetime import datetime
 import json
 from flask import current_app
+import logging
+
+# Add this logger configuration
+logger = logging.getLogger(__name__)
 
 
 class MpesaService:
@@ -41,74 +45,125 @@ class MpesaService:
 
     def get_access_token(self):
         """Get M-Pesa access token"""
-        if not self.mpesa_consumer_key or not self.mpesa_consumer_secret:
-            return {'success': False, 'error': 'M-Pesa credentials not configured'}
-
-        url = f"{self.base_url}/oauth/v1/generate?grant_type=client_credentials"
         try:
+            logger.info("🔑 Getting M-Pesa access token...")
+
+            if not self.mpesa_consumer_key or not self.mpesa_consumer_secret:
+                logger.error("❌ M-Pesa credentials not configured")
+                return {'success': False, 'error': 'M-Pesa credentials not configured'}
+
+            url = f"{self.base_url}/oauth/v1/generate?grant_type=client_credentials"
+            logger.info(f"🌐 Token URL: {url}")
+            logger.info(f"🔑 Consumer Key: {self.mpesa_consumer_key[:20]}...")
+
             response = requests.get(
                 url,
                 auth=(self.mpesa_consumer_key, self.mpesa_consumer_secret),
                 timeout=30
             )
+
+            logger.info(f"📥 Token response status: {response.status_code}")
+
             if response.status_code == 200:
-                token = response.json().get('access_token')
-                return {'success': True, 'token': token}
-            return {'success': False, 'error': response.text}
+                data = response.json()
+                token = data.get('access_token')
+                if token:
+                    logger.info("✅ Access token obtained successfully")
+                    return {'success': True, 'token': token}
+                else:
+                    logger.error(f"❌ No token in response: {data}")
+                    return {'success': False, 'error': 'No access token in response'}
+            else:
+                logger.error(f"❌ Failed to get token: {response.text}")
+                return {'success': False, 'error': response.text}
+
         except Exception as e:
-            print(f"Error getting access token: {e}")
+            logger.error(f"❌ Error getting access token: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return {'success': False, 'error': str(e)}
 
     def stk_push(self, phone_number, amount, account_reference, transaction_desc):
         """Initiate STK Push payment"""
-        # Validate configuration
-        if not self.mpesa_consumer_key or not self.mpesa_consumer_secret:
-            return {'success': False, 'error': 'M-Pesa credentials not configured'}
-
-        # Get access token
-        token_result = self.get_access_token()
-        if not token_result.get('success'):
-            return {'success': False, 'error': token_result.get('error', 'Failed to get access token')}
-
-        access_token = token_result.get('token')
-
-        # Format phone number (remove leading 0, add 254)
-        phone_number = self.format_phone_number(phone_number)
-
-        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-        password = base64.b64encode(f"{self.mpesa_shortcode}{self.mpesa_passkey}{timestamp}".encode()).decode()
-
-        url = f"{self.base_url}/mpesa/stkpush/v1/processrequest"
-        headers = {
-            'Authorization': f'Bearer {access_token}',
-            'Content-Type': 'application/json'
-        }
-        payload = {
-            'BusinessShortCode': self.mpesa_shortcode,
-            'Password': password,
-            'Timestamp': timestamp,
-            'TransactionType': 'CustomerPayBillOnline',
-            'Amount': int(amount),
-            'PartyA': phone_number,
-            'PartyB': self.mpesa_shortcode,
-            'PhoneNumber': phone_number,
-            'CallBackURL': self.mpesa_callback_url,
-            'AccountReference': account_reference[:20],  # Max 20 characters
-            'TransactionDesc': transaction_desc[:20] if transaction_desc else 'Rent Payment'
-        }
-
         try:
+            logger.info(f"🔧 STK Push called with: phone={phone_number}, amount={amount}")
+
+            # Validate configuration
+            if not self.mpesa_consumer_key or not self.mpesa_consumer_secret:
+                logger.error("❌ M-Pesa credentials not configured")
+                return {'success': False, 'error': 'M-Pesa credentials not configured'}
+
+            # Get access token
+            logger.info("🔑 Getting access token...")
+            token_result = self.get_access_token()
+
+            if not token_result.get('success'):
+                return {'success': False, 'error': token_result.get('error', 'Failed to get access token')}
+
+            access_token = token_result.get('token')
+            logger.info(f"✅ Access token obtained: {access_token[:30]}...")
+
+            # Format phone number
+            phone_number = self.format_phone_number(phone_number)
+            logger.info(f"📱 Formatted phone: {phone_number}")
+
+            timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+            password = base64.b64encode(f"{self.mpesa_shortcode}{self.mpesa_passkey}{timestamp}".encode()).decode()
+
+            url = f"{self.base_url}/mpesa/stkpush/v1/processrequest"
+            logger.info(f"🌐 URL: {url}")
+
+            headers = {
+                'Authorization': f'Bearer {access_token}',
+                'Content-Type': 'application/json'
+            }
+
+            payload = {
+                'BusinessShortCode': self.mpesa_shortcode,
+                'Password': password,
+                'Timestamp': timestamp,
+                'TransactionType': 'CustomerPayBillOnline',
+                'Amount': int(amount),
+                'PartyA': phone_number,
+                'PartyB': self.mpesa_shortcode,
+                'PhoneNumber': phone_number,
+                'CallBackURL': self.mpesa_callback_url,
+                'AccountReference': account_reference[:20],
+                'TransactionDesc': transaction_desc[:20] if transaction_desc else 'Rent Payment'
+            }
+
+            logger.info(f"📤 Sending STK Push request...")
+
             response = requests.post(url, json=payload, headers=headers, timeout=30)
+
+            logger.info(f"📥 Response status: {response.status_code}")
+            logger.info(f"📥 Response body: {response.text[:500]}")
+
             if response.status_code == 200:
                 response_data = response.json()
-                return {
-                    'success': True,
-                    'data': response_data,
-                    'CheckoutRequestID': response_data.get('CheckoutRequestID')
-                }
-            return {'success': False, 'error': response.text}
+                logger.info(f"✅ STK Push response: {response_data}")
+
+                if response_data.get('ResponseCode') == '0':
+                    return {
+                        'success': True,
+                        'data': response_data,
+                        'CheckoutRequestID': response_data.get('CheckoutRequestID'),
+                        'MerchantRequestID': response_data.get('MerchantRequestID'),
+                        'ResponseDescription': response_data.get('ResponseDescription')
+                    }
+                else:
+                    error_msg = response_data.get('errorMessage') or response_data.get(
+                        'ResponseDescription') or 'STK Push failed'
+                    logger.error(f"❌ STK Push failed: {error_msg}")
+                    return {'success': False, 'error': error_msg}
+            else:
+                logger.error(f"❌ HTTP Error: {response.status_code}")
+                return {'success': False, 'error': f"HTTP {response.status_code}: {response.text}"}
+
         except Exception as e:
-            print(f"STK Push error: {e}")
+            logger.error(f"❌ STK Push error: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return {'success': False, 'error': str(e)}
 
     def format_phone_number(self, phone_number):
@@ -130,66 +185,78 @@ class MpesaService:
 
     def query_status(self, checkout_request_id):
         """Query STK Push status"""
-        token_result = self.get_access_token()
-        if not token_result.get('success'):
-            return {'success': False, 'error': token_result.get('error', 'Failed to get access token')}
-
-        access_token = token_result.get('token')
-
-        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-        password = base64.b64encode(f"{self.mpesa_shortcode}{self.mpesa_passkey}{timestamp}".encode()).decode()
-
-        url = f"{self.base_url}/mpesa/stkpushquery/v1/query"
-        headers = {
-            'Authorization': f'Bearer {access_token}',
-            'Content-Type': 'application/json'
-        }
-        payload = {
-            'BusinessShortCode': self.mpesa_shortcode,
-            'Password': password,
-            'Timestamp': timestamp,
-            'CheckoutRequestID': checkout_request_id
-        }
-
         try:
+            logger.info(f"🔍 Querying status for: {checkout_request_id}")
+
+            token_result = self.get_access_token()
+            if not token_result.get('success'):
+                return {'success': False, 'error': token_result.get('error', 'Failed to get access token')}
+
+            access_token = token_result.get('token')
+
+            timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+            password = base64.b64encode(f"{self.mpesa_shortcode}{self.mpesa_passkey}{timestamp}".encode()).decode()
+
+            url = f"{self.base_url}/mpesa/stkpushquery/v1/query"
+            headers = {
+                'Authorization': f'Bearer {access_token}',
+                'Content-Type': 'application/json'
+            }
+            payload = {
+                'BusinessShortCode': self.mpesa_shortcode,
+                'Password': password,
+                'Timestamp': timestamp,
+                'CheckoutRequestID': checkout_request_id
+            }
+
             response = requests.post(url, json=payload, headers=headers, timeout=30)
+
             if response.status_code == 200:
                 return {'success': True, 'data': response.json()}
             return {'success': False, 'error': response.text}
+
         except Exception as e:
+            logger.error(f"❌ Query status error: {str(e)}")
             return {'success': False, 'error': str(e)}
 
     def parse_callback(self, callback_data):
         """Parse M-Pesa callback data"""
-        if 'Body' in callback_data and 'stkCallback' in callback_data['Body']:
-            callback = callback_data['Body']['stkCallback']
+        try:
+            logger.info("📥 Parsing M-Pesa callback")
 
-            if callback['ResultCode'] == 0:
-                # Success
-                items = callback.get('CallbackMetadata', {}).get('Item', [])
-                payment_data = {}
-                for item in items:
-                    payment_data[item['Name']] = item.get('Value')
+            if 'Body' in callback_data and 'stkCallback' in callback_data['Body']:
+                callback = callback_data['Body']['stkCallback']
 
-                return {
-                    'success': True,
-                    'receipt_no': payment_data.get('ReceiptNumber'),
-                    'amount': payment_data.get('Amount'),
-                    'mpesa_code': callback.get('MerchantRequestID'),
-                    'phone': payment_data.get('PhoneNumber'),
-                    'result_code': '0',
-                    'result_desc': 'Success'
-                }
-            else:
-                # Failed
-                return {
-                    'success': False,
-                    'message': callback.get('ResultDesc', 'Payment failed'),
-                    'result_code': callback.get('ResultCode'),
-                    'result_desc': callback.get('ResultDesc')
-                }
+                if callback['ResultCode'] == 0:
+                    # Success
+                    items = callback.get('CallbackMetadata', {}).get('Item', [])
+                    payment_data = {}
+                    for item in items:
+                        payment_data[item['Name']] = item.get('Value')
 
-        return {'success': False, 'message': 'Invalid callback data'}
+                    return {
+                        'success': True,
+                        'receipt_no': payment_data.get('MpesaReceiptNumber'),
+                        'amount': payment_data.get('Amount'),
+                        'mpesa_code': callback.get('MerchantRequestID'),
+                        'phone': payment_data.get('PhoneNumber'),
+                        'result_code': '0',
+                        'result_desc': 'Success'
+                    }
+                else:
+                    # Failed
+                    return {
+                        'success': False,
+                        'message': callback.get('ResultDesc', 'Payment failed'),
+                        'result_code': callback.get('ResultCode'),
+                        'result_desc': callback.get('ResultDesc')
+                    }
+
+            return {'success': False, 'message': 'Invalid callback data'}
+
+        except Exception as e:
+            logger.error(f"❌ Parse callback error: {str(e)}")
+            return {'success': False, 'error': str(e)}
 
     def simulate_payment(self, phone_number, amount, account_reference):
         """Simulate a payment for testing (sandbox only)"""

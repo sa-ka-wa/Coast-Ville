@@ -8,6 +8,9 @@ from App.Routes.api import api_bp
 import os
 from dotenv import load_dotenv
 
+# Force load .env at the very beginning
+load_dotenv(override=True)
+
 load_dotenv()
 
 

@@ -136,3 +136,62 @@ def change_password():
     except Exception as e:
         logger.error(f"Password change error: {str(e)}")
         return jsonify({'message': str(e)}), 400
+
+
+# App/Routes/auth.py - Add this after your other routes
+
+# App/Routes/auth.py - REPLACE the entire switch_role endpoint
+
+@auth_bp.route('/switch-role', methods=['POST'])
+@jwt_required()
+def switch_role():
+    """Switch user role between admin and caretaker"""
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json()
+        new_role = data.get('role')
+
+        if new_role not in ['admin', 'caretaker']:
+            return jsonify({'message': 'Invalid role'}), 400
+
+        user = User.query.get(int(user_id))
+        if not user:
+            return jsonify({'message': 'User not found'}), 404
+
+        current_role = user.role
+        current_secondary = user.secondary_role
+
+        # If trying to switch to the same role
+        if new_role == current_role:
+            return jsonify({
+                'message': 'Already in this role',
+                'user': user.to_dict()
+            }), 200
+
+        # Check if user has a secondary_role
+        if current_secondary is None:
+            return jsonify({'message': 'User does not have multiple roles'}), 403
+
+        # Check if the requested role is available as secondary
+        if new_role != current_secondary:
+            return jsonify({'message': f'User does not have the {new_role} role'}), 403
+
+        # CRITICAL FIX: Swap the roles properly
+        # The new primary becomes the old secondary, and the new secondary becomes the old primary
+        user.role = new_role  # This is current_secondary
+        user.secondary_role = current_role  # This is the old primary
+
+        db.session.commit()
+
+        logger.info(f"✅ Role switched for user {user.email} from {current_role} to {new_role}")
+        logger.info(f"   New secondary_role: {user.secondary_role}")
+
+        return jsonify({
+            'message': 'Role switched successfully',
+            'user': user.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Switch role error: {str(e)}")
+        return jsonify({'message': f'Error switching role: {str(e)}'}), 500

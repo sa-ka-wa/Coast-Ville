@@ -10,17 +10,20 @@ class Unit(db.Model):
     property_id = db.Column(db.Integer, db.ForeignKey('properties.id'))
     unit_number = db.Column(db.String(20), nullable=False)
     floor = db.Column(db.String(10))
-    unit_type = db.Column(db.String(20))  # 1BR, 2BR, Studio
+    unit_type = db.Column(db.String(20))
     monthly_rent = db.Column(db.Float)
     deposit = db.Column(db.Float)
-    status = db.Column(db.String(20), default='available')  # available, occupied, maintenance
+    status = db.Column(db.String(20), default='available')
     size_sqft = db.Column(db.Integer)
     bedrooms = db.Column(db.Integer)
     bathrooms = db.Column(db.Integer)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # Relationships
-    tenant = db.relationship('Tenant', backref='unit', uselist=False, lazy=True)
+    # Relationships - All defined here
+    property = db.relationship('Property', back_populates='units')
+    tenant = db.relationship('Tenant', back_populates='unit', uselist=False)
+    payments = db.relationship('Payment', back_populates='unit')
+    water_bills = db.relationship('WaterBill', back_populates='unit')
 
     def to_dict(self):
         return {

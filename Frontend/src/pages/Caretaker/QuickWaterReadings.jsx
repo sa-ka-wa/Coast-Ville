@@ -15,6 +15,7 @@ import {
   Typography,
   Tag,
   Statistic,
+  Spin,
 } from "antd";
 import {
   PlusOutlined,
@@ -24,10 +25,12 @@ import {
   HomeOutlined,
   UserOutlined,
   DollarOutlined,
+  HistoryOutlined,
 } from "@ant-design/icons";
 import { useProperty } from "../../context/PropertyContext";
 import { getTenants } from "../../services/tenants";
-import { submitWaterReading } from "../../services/water";
+import { submitWaterReading, getWaterReadings } from "../../services/water";
+import { formatDate } from "../../utils/formatters";
 
 const { Option } = Select;
 const { Text } = Typography;
@@ -38,6 +41,7 @@ const QuickWaterReadings = () => {
   const [tenants, setTenants] = useState([]);
   const [readings, setReadings] = useState([]);
   const [currentTenant, setCurrentTenant] = useState(null);
+  const [lastReading, setLastReading] = useState(null);
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
   const [stats, setStats] = useState({
@@ -75,45 +79,119 @@ const QuickWaterReadings = () => {
     }
   };
 
+  const fetchLastReading = async (tenantId) => {
+    try {
+      // Fetch the most recent reading for this tenant
+      const response = await getWaterReadings({
+        tenant_id: tenantId,
+      });
+
+      const readingsList = response.data || [];
+      if (readingsList.length > 0) {
+        // Sort by date descending and get the latest
+        const sorted = [...readingsList].sort(
+          (a, b) => new Date(b.readingDate) - new Date(a.readingDate),
+        );
+        const last = sorted[0];
+        setLastReading(last);
+        // Auto-populate previous reading with last month's current reading
+        const previousValue = parseFloat(last.currentReading) || 0;
+        form.setFieldsValue({
+          previousReading: previousValue,
+        });
+        return previousValue;
+      } else {
+        setLastReading(null);
+        form.setFieldsValue({
+          previousReading: 0,
+        });
+        return 0;
+      }
+    } catch (error) {
+      console.error("Error fetching last reading:", error);
+      setLastReading(null);
+      form.setFieldsValue({
+        previousReading: 0,
+      });
+      return 0;
+    }
+  };
+
+  const handleTenantSelect = (tenantId) => {
+    const tenant = tenants.find((t) => t.id === tenantId);
+    setCurrentTenant(tenant);
+    form.setFieldValue("tenantName", tenant?.name);
+    // Reset form values
+    form.setFieldsValue({
+      previousReading: 0,
+      currentReading: undefined,
+    });
+    // Fetch last reading and auto-populate previous
+    if (tenantId) {
+      fetchLastReading(tenantId);
+    }
+  };
+
   const handleAddReading = () => {
     if (!currentTenant) {
       message.warning("Please select a tenant first");
       return;
     }
 
-    form.validateFields().then((values) => {
-      const previous = parseFloat(values.previousReading);
-      const current = parseFloat(values.currentReading);
-      const unitsUsed = current - previous;
-      const rate = values.rate || 70;
-      const amount = unitsUsed * rate;
+    form
+      .validateFields()
+      .then((values) => {
+        // Parse values as floats, default to 0
+        const previous = parseFloat(values.previousReading) || 0;
+        const current = parseFloat(values.currentReading);
 
-      if (unitsUsed < 0) {
-        message.error("Current reading must be greater than previous reading");
-        return;
-      }
+        // Validate current reading
+        if (isNaN(current) || current === undefined || current === null) {
+          message.error("Please enter a valid current reading");
+          return;
+        }
 
-      const newReading = {
-        id: Date.now(),
-        tenantId: currentTenant.id,
-        tenantName: currentTenant.name,
-        houseNo: currentTenant.houseNo,
-        previousReading: previous,
-        currentReading: current,
-        unitsUsed: unitsUsed,
-        rate: rate,
-        amount: amount,
-        readingDate:
-          values.readingDate || new Date().toISOString().split("T")[0],
-        notes: values.notes || "",
-        status: "pending",
-      };
+        const unitsUsed = current - previous;
+        const rate = parseFloat(values.rate) || 70;
+        const amount = unitsUsed * rate;
 
-      setReadings([...readings, newReading]);
-      form.resetFields();
-      setCurrentTenant(null);
-      message.success(`✅ Reading added for ${currentTenant.name}`);
-    });
+        if (unitsUsed < 0) {
+          message.error(
+            "Current reading must be greater than previous reading",
+          );
+          return;
+        }
+
+        if (unitsUsed > 100) {
+          message.warning(
+            "⚠️ High consumption detected: " + unitsUsed + " units",
+          );
+        }
+
+        const newReading = {
+          id: Date.now(),
+          tenantId: currentTenant.id,
+          tenantName: currentTenant.name,
+          houseNo: currentTenant.houseNo || "N/A",
+          previousReading: previous,
+          currentReading: current,
+          unitsUsed: Math.round(unitsUsed * 100) / 100, // Round to 2 decimal places
+          rate: rate,
+          amount: Math.round(amount * 100) / 100,
+          readingDate: new Date().toISOString().split("T")[0],
+          notes: values.notes || "",
+          status: "pending",
+        };
+
+        setReadings([...readings, newReading]);
+        form.resetFields();
+        setCurrentTenant(null);
+        setLastReading(null);
+        message.success(`✅ Reading added for ${currentTenant.name}`);
+      })
+      .catch((error) => {
+        console.error("Form validation error:", error);
+      });
   };
 
   const handleRemoveReading = (id) => {
@@ -173,7 +251,7 @@ const QuickWaterReadings = () => {
       render: (_, record) => (
         <Space>
           <UserOutlined style={{ color: "#1890ff" }} />
-          <strong>{record.tenantName}</strong>
+          <strong>{record.tenantName || "Unknown"}</strong>
           <Tag color="blue">{record.houseNo || "N/A"}</Tag>
         </Space>
       ),
@@ -191,14 +269,18 @@ const QuickWaterReadings = () => {
     {
       title: "Units Used",
       dataIndex: "unitsUsed",
-      render: (val) => <Tag color="orange">{val || 0}</Tag>,
+      render: (val) => {
+        const units = parseFloat(val) || 0;
+        const color = units > 40 ? "red" : units > 25 ? "orange" : "green";
+        return <Tag color={color}>{units}</Tag>;
+      },
     },
     {
       title: "Amount",
       dataIndex: "amount",
       render: (val) => (
         <span style={{ fontWeight: 600, color: "#52c41a" }}>
-          KSh {(val || 0).toLocaleString()}
+          KSh {(parseFloat(val) || 0).toLocaleString()}
         </span>
       ),
     },
@@ -256,7 +338,7 @@ const QuickWaterReadings = () => {
               title="Total Amount"
               value={stats.totalAmount}
               prefix={<DollarOutlined />}
-              formatter={(value) => `KSh ${value.toLocaleString()}`}
+              formatter={(value) => `KSh ${(value || 0).toLocaleString()}`}
               valueStyle={{ color: "#52c41a" }}
             />
           </Card>
@@ -270,9 +352,13 @@ const QuickWaterReadings = () => {
           description={
             <div>
               <p>1. Select a tenant from the dropdown</p>
-              <p>2. Enter the previous and current meter readings</p>
-              <p>3. Click "Add Reading" to add to the queue</p>
-              <p>4. Submit all readings at once when done</p>
+              <p>
+                2. Previous reading is auto-filled from last month's current
+                reading
+              </p>
+              <p>3. Enter the current meter reading</p>
+              <p>4. Click "Add Reading" to add to the queue</p>
+              <p>5. Submit all readings at once when done</p>
             </div>
           }
           type="info"
@@ -280,19 +366,15 @@ const QuickWaterReadings = () => {
           style={{ marginBottom: 16 }}
         />
 
-        <Form form={form} layout="inline" style={{ width: "100%" }}>
-          <Form.Item style={{ flex: 1 }}>
+        <Form form={form} layout="vertical" style={{ width: "100%" }}>
+          <Form.Item style={{ marginBottom: 8 }}>
             <Select
               placeholder="Select Tenant"
               style={{ width: "100%" }}
               showSearch
               optionFilterProp="children"
               value={currentTenant?.id}
-              onChange={(value) => {
-                const tenant = tenants.find((t) => t.id === value);
-                setCurrentTenant(tenant);
-                form.setFieldValue("tenantName", tenant?.name);
-              }}
+              onChange={handleTenantSelect}
               size="large"
             >
               {tenants.map((tenant) => (
@@ -303,44 +385,56 @@ const QuickWaterReadings = () => {
             </Select>
           </Form.Item>
 
-          <Form.Item>
-            <Input
-              type="number"
-              placeholder="Previous"
-              size="large"
-              prefix={<HomeOutlined />}
-              style={{ width: 130 }}
+          {lastReading && (
+            <Alert
+              message={`📖 Last reading: ${lastReading.currentReading || 0} (${formatDate(lastReading.readingDate)})`}
+              type="info"
+              showIcon
+              style={{ marginBottom: 8 }}
             />
-          </Form.Item>
+          )}
 
-          <Form.Item>
-            <Input
-              type="number"
-              placeholder="Current"
-              size="large"
-              prefix={<HomeOutlined />}
-              style={{ width: 130 }}
-            />
-          </Form.Item>
+          <Row gutter={8}>
+            <Col span={12}>
+              <Form.Item style={{ marginBottom: 8 }}>
+                <Input
+                  type="number"
+                  placeholder="Previous (auto-filled)"
+                  size="large"
+                  prefix={<HistoryOutlined />}
+                  disabled
+                  value={form.getFieldValue("previousReading") || 0}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item style={{ marginBottom: 8 }}>
+                <Input
+                  type="number"
+                  placeholder="Current Reading"
+                  size="large"
+                  prefix={<HomeOutlined />}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
 
-          <Form.Item>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={handleAddReading}
-              size="large"
-            >
-              Add
-            </Button>
-          </Form.Item>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={handleAddReading}
+            size="large"
+            block
+          >
+            Add Reading
+          </Button>
+
+          {currentTenant && (
+            <div style={{ marginTop: 8, fontSize: 12, color: "#8c8c8c" }}>
+              📝 {currentTenant.name} ({currentTenant.houseNo || "N/A"})
+            </div>
+          )}
         </Form>
-
-        {currentTenant && (
-          <div style={{ marginTop: 8, color: "#8c8c8c" }}>
-            📝 Adding reading for: <strong>{currentTenant.name}</strong>
-            (House: {currentTenant.houseNo || "N/A"})
-          </div>
-        )}
       </Card>
 
       {/* Readings Queue */}
@@ -398,11 +492,11 @@ const QuickWaterReadings = () => {
                   <Table.Summary.Cell index={1} />
                   <Table.Summary.Cell index={2} />
                   <Table.Summary.Cell index={3}>
-                    <strong>{stats.totalUnits} units</strong>
+                    <strong>{stats.totalUnits || 0} units</strong>
                   </Table.Summary.Cell>
                   <Table.Summary.Cell index={4}>
                     <strong style={{ color: "#52c41a", fontSize: 16 }}>
-                      KSh {stats.totalAmount.toLocaleString()}
+                      KSh {(stats.totalAmount || 0).toLocaleString()}
                     </strong>
                   </Table.Summary.Cell>
                   <Table.Summary.Cell index={5} />

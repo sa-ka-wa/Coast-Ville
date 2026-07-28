@@ -1,4 +1,4 @@
-// services/tenants.js - Clean version
+// services/tenants.js - Complete version
 import api from "./api";
 
 // Mock data (fallback only)
@@ -62,7 +62,6 @@ export const getTenants = async (filters = {}) => {
   try {
     console.log("📡 Fetching tenants with filters:", filters);
 
-    // Clean filters - remove empty values
     const cleanFilters = {};
     Object.keys(filters).forEach((key) => {
       if (
@@ -74,9 +73,6 @@ export const getTenants = async (filters = {}) => {
       }
     });
 
-    console.log("📡 Clean filters:", cleanFilters);
-
-    // Use axios with params - THIS IS THE CORRECT APPROACH
     const response = await api.get("/tenants", {
       params: cleanFilters,
     });
@@ -85,7 +81,6 @@ export const getTenants = async (filters = {}) => {
     return response;
   } catch (error) {
     console.warn("⚠️ API failed, using mock data:", error.message);
-    // Fallback to mock data with property filtering
     await new Promise((resolve) => setTimeout(resolve, 500));
     let tenants = [...MOCK_TENANTS];
 
@@ -258,6 +253,40 @@ export const getTenantWaterReadings = async (id) => {
   }
 };
 
+// ✅ Get tenant water bills
+export const getTenantWaterBills = async (tenantId) => {
+  try {
+    const response = await api.get(`/tenants/${tenantId}/water/bills`);
+    return response;
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for getTenantWaterBills, using mock:",
+      error.message,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return {
+      data: [
+        {
+          id: 1,
+          month: "2026-06-01",
+          water_charge: 1200,
+          garbage_charge: 300,
+          total: 1500,
+          status: "paid",
+        },
+        {
+          id: 2,
+          month: "2026-07-01",
+          water_charge: 1500,
+          garbage_charge: 0,
+          total: 1500,
+          status: "pending",
+        },
+      ],
+    };
+  }
+}; // ✅ This closes the function properly
+
 // Update tenant status
 export const updateTenantStatus = async (id, status) => {
   try {
@@ -331,6 +360,7 @@ const tenantsService = {
   getTenantByPhone,
   getTenantPayments,
   getTenantWaterReadings,
+  getTenantWaterBills, // ✅ Added this
   updateTenantStatus,
   getTenantStats,
   bulkImportTenants,

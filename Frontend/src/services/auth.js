@@ -96,10 +96,37 @@ export const changePassword = async (currentPassword, newPassword) => {
   }
 };
 
+export const updateProfile = async (userData) => {
+  try {
+    const response = await api.put("/auth/profile", userData);
+    return response;
+  } catch (error) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return {
+      data: { message: "Profile updated successfully", user: userData },
+    };
+  }
+};
+
+// FIXED: switchRole now returns the full user object
+export const switchRole = async (role) => {
+  try {
+    const response = await api.post("/auth/switch-role", { role });
+    // The API should return the updated user
+    return response;
+  } catch (error) {
+    console.error("Switch role error:", error);
+    // Don't use mock for this - we want the real API response
+    throw error;
+  }
+};
+
 export default {
   login,
   register,
   logout,
   getCurrentUser,
   changePassword,
+  updateProfile,
+  switchRole,
 };

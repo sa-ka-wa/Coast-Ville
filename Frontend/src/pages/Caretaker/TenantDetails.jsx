@@ -11,7 +11,6 @@ import {
   Space,
   Descriptions,
   Badge,
-  Timeline,
   Divider,
   Progress,
   Tabs,
@@ -29,7 +28,6 @@ import {
   PhoneOutlined,
   HomeOutlined,
   DollarOutlined,
-  CalendarOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
   ClockCircleOutlined,
@@ -38,20 +36,20 @@ import {
   DownloadOutlined,
   PrinterOutlined,
   WhatsAppOutlined,
-  MailOutlined,
   EyeOutlined,
-  ArrowUpOutlined,
-  ArrowDownOutlined,
   WalletOutlined,
   ScheduleOutlined,
   PercentageOutlined,
   HistoryOutlined,
+  PieChartOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import {
   getTenant,
   getTenantPayments,
   getTenantWaterReadings,
+  getTenantWaterBills,
   getTenantStats,
 } from "../../services/tenants";
 import {
@@ -59,6 +57,7 @@ import {
   formatDate,
   getStatusColor,
 } from "../../utils/formatters";
+import { getPaymentAllocation } from "../../services/payments";
 
 const { TabPane } = Tabs;
 const { RangePicker } = DatePicker;
@@ -66,12 +65,17 @@ const { Option } = Select;
 
 const TenantDetails = () => {
   const { id } = useParams();
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [tenant, setTenant] = useState(null);
   const [payments, setPayments] = useState([]);
   const [waterReadings, setWaterReadings] = useState([]);
+  const [waterBills, setWaterBills] = useState([]);
   const [stats, setStats] = useState(null);
+  const [paymentAllocations, setPaymentAllocations] = useState({});
+  const [loadingAllocations, setLoadingAllocations] = useState(false);
+  const [paymentFilter, setPaymentFilter] = useState("all");
+  const [dateRange, setDateRange] = useState(null);
+
   const [summary, setSummary] = useState({
     totalPaid: 0,
     expectedRent: 0,
@@ -79,9 +83,12 @@ const TenantDetails = () => {
     latePayments: 0,
     onTimePayments: 0,
     paymentRate: 0,
+    totalDeposit: 0,
+    totalRent: 0,
+    totalWater: 0,
+    totalExcess: 0,
+    totalBalanceDue: 0,
   });
-  const [paymentFilter, setPaymentFilter] = useState("all");
-  const [dateRange, setDateRange] = useState(null);
 
   useEffect(() => {
     fetchTenantData();
@@ -90,18 +97,24 @@ const TenantDetails = () => {
   const fetchTenantData = async () => {
     setLoading(true);
     try {
-      const [tenantRes, paymentsRes, waterRes, statsRes] = await Promise.all([
-        getTenant(id),
-        getTenantPayments(id),
-        getTenantWaterReadings(id),
-        getTenantStats(id),
-      ]);
+      const [tenantRes, paymentsRes, waterRes, waterBillsRes, statsRes] =
+        await Promise.all([
+          getTenant(id),
+          getTenantPayments(id),
+          getTenantWaterReadings(id),
+          getTenantWaterBills(id),
+          getTenantStats(id),
+        ]);
 
       setTenant(tenantRes.data);
-      setPayments(paymentsRes.data || []);
+      const paymentsList = paymentsRes.data || [];
+      setPayments(paymentsList);
       setWaterReadings(waterRes.data || []);
+      setWaterBills(waterBillsRes.data || []);
       setStats(statsRes.data);
-      calculateSummary(paymentsRes.data || []);
+
+      await fetchAllocations(paymentsList);
+      calculateSummary(paymentsList);
     } catch (error) {
       message.error("Failed to fetch tenant data");
       console.error("Error:", error);
@@ -110,20 +123,52 @@ const TenantDetails = () => {
     }
   };
 
+  const fetchAllocations = async (paymentsList) => {
+    setLoadingAllocations(true);
+    const allocations = {};
+    for (const payment of paymentsList) {
+      try {
+        const response = await getPaymentAllocation(payment.id);
+        allocations[payment.id] = response.data.allocations || {};
+      } catch (error) {
+        console.error(
+          `Failed to get allocation for payment ${payment.id}:`,
+          error,
+        );
+      }
+    }
+    setPaymentAllocations(allocations);
+    setLoadingAllocations(false);
+  };
+
   const calculateSummary = (paymentData) => {
     const totalPaid = paymentData.reduce((sum, p) => sum + p.amount, 0);
     const expectedRent = tenant?.monthlyRent || 0;
     const balance = expectedRent - totalPaid;
 
-    // Calculate late payments (payment date > 5th of month)
     const latePayments = paymentData.filter((p) => {
-      const day = new Date(p.date).getDate();
+      const day = new Date(p.payment_date).getDate();
       return day > 5;
     }).length;
 
     const onTimePayments = paymentData.length - latePayments;
     const paymentRate =
       paymentData.length > 0 ? (onTimePayments / paymentData.length) * 100 : 0;
+
+    let totalDeposit = 0;
+    let totalRent = 0;
+    let totalWater = 0;
+    let totalExcess = 0;
+    let totalBalanceDue = 0;
+
+    paymentData.forEach((p) => {
+      const alloc = paymentAllocations[p.id] || {};
+      totalDeposit += alloc.deposit || 0;
+      totalRent += alloc.rent || 0;
+      totalWater += alloc.water || 0;
+      totalExcess += alloc.excess || 0;
+      totalBalanceDue += alloc.balance_due || 0;
+    });
 
     setSummary({
       totalPaid,
@@ -132,11 +177,16 @@ const TenantDetails = () => {
       latePayments,
       onTimePayments,
       paymentRate,
+      totalDeposit,
+      totalRent,
+      totalWater,
+      totalExcess,
+      totalBalanceDue,
     });
   };
 
   const getPaymentStatus = (payment) => {
-    const day = new Date(payment.date).getDate();
+    const day = new Date(payment.payment_date).getDate();
     if (day <= 5)
       return { color: "green", text: "On Time", icon: <CheckCircleOutlined /> };
     if (day <= 15)
@@ -158,14 +208,14 @@ const TenantDetails = () => {
     return colors[method] || "default";
   };
 
-  // Payment Columns
+  // Payment Columns with Allocation Breakdown
   const paymentColumns = [
     {
       title: "Date",
-      dataIndex: "date",
-      key: "date",
+      dataIndex: "payment_date",
+      key: "payment_date",
       render: (date) => formatDate(date),
-      sorter: (a, b) => new Date(a.date) - new Date(b.date),
+      sorter: (a, b) => new Date(a.payment_date) - new Date(b.payment_date),
     },
     {
       title: "Amount",
@@ -179,11 +229,51 @@ const TenantDetails = () => {
       sorter: (a, b) => a.amount - b.amount,
     },
     {
+      title: "Allocation",
+      key: "allocation",
+      render: (_, record) => {
+        const alloc = paymentAllocations[record.id] || {};
+        const hasAllocation =
+          alloc.rent > 0 || alloc.water > 0 || alloc.deposit > 0;
+
+        if (!hasAllocation) {
+          return <Tag color="default">Pending</Tag>;
+        }
+
+        return (
+          <Space size={4} wrap>
+            {alloc.rent > 0 && (
+              <Tag color="blue" style={{ margin: 2 }}>
+                🏠 {formatCurrency(alloc.rent)}
+              </Tag>
+            )}
+            {alloc.water > 0 && (
+              <Tag color="green" style={{ margin: 2 }}>
+                💧 {formatCurrency(alloc.water)}
+              </Tag>
+            )}
+            {alloc.deposit > 0 && (
+              <Tag color="orange" style={{ margin: 2 }}>
+                🏦 {formatCurrency(alloc.deposit)}
+              </Tag>
+            )}
+            {alloc.excess > 0 && (
+              <Tag color="cyan" style={{ margin: 2 }}>
+                💰 +{formatCurrency(alloc.excess)}
+              </Tag>
+            )}
+          </Space>
+        );
+      },
+    },
+    {
       title: "Method",
-      dataIndex: "method",
-      key: "method",
+      dataIndex: "payment_method",
+      key: "payment_method",
       render: (method) => (
-        <Tag color={getPaymentMethodColor(method)}>{method.toUpperCase()}</Tag>
+        <Tag color={getPaymentMethodColor(method)}>
+          {method?.toUpperCase() || "N/A"}
+        </Tag>
       ),
     },
     {
@@ -196,9 +286,9 @@ const TenantDetails = () => {
     },
     {
       title: "Receipt",
-      dataIndex: "receiptNo",
-      key: "receiptNo",
-      render: (text) => <Tag color="blue">{text}</Tag>,
+      dataIndex: "receipt_no",
+      key: "receipt_no",
+      render: (text) => <Tag color="blue">{text || "N/A"}</Tag>,
     },
     {
       title: "Actions",
@@ -208,6 +298,53 @@ const TenantDetails = () => {
           <Tooltip title="View Receipt">
             <Button icon={<EyeOutlined />} size="small" />
           </Tooltip>
+          <Tooltip title="View Allocation">
+            <Button
+              icon={<PieChartOutlined />}
+              size="small"
+              onClick={() => {
+                const alloc = paymentAllocations[record.id] || {};
+                Modal.info({
+                  title: `Payment Allocation - ${record.receipt_no}`,
+                  content: (
+                    <div>
+                      <Descriptions bordered column={1} size="small">
+                        <Descriptions.Item label="Total Amount">
+                          <strong>{formatCurrency(record.amount)}</strong>
+                        </Descriptions.Item>
+                        {alloc.rent > 0 && (
+                          <Descriptions.Item label="🏠 Rent">
+                            {formatCurrency(alloc.rent)}
+                          </Descriptions.Item>
+                        )}
+                        {alloc.water > 0 && (
+                          <Descriptions.Item label="💧 Water">
+                            {formatCurrency(alloc.water)}
+                          </Descriptions.Item>
+                        )}
+                        {alloc.deposit > 0 && (
+                          <Descriptions.Item label="🏦 Deposit">
+                            {formatCurrency(alloc.deposit)}
+                          </Descriptions.Item>
+                        )}
+                        {alloc.excess > 0 && (
+                          <Descriptions.Item label="💰 Credit Next Month">
+                            +{formatCurrency(alloc.excess)}
+                          </Descriptions.Item>
+                        )}
+                        {alloc.balance_due > 0 && (
+                          <Descriptions.Item label="⚠️ Balance Due">
+                            {formatCurrency(alloc.balance_due)}
+                          </Descriptions.Item>
+                        )}
+                      </Descriptions>
+                    </div>
+                  ),
+                  width: 500,
+                });
+              }}
+            />
+          </Tooltip>
           <Tooltip title="Download">
             <Button icon={<DownloadOutlined />} size="small" />
           </Tooltip>
@@ -216,37 +353,241 @@ const TenantDetails = () => {
     },
   ];
 
+  // ============================================================
+  // PAYMENT SUMMARY TABLE
+  // ============================================================
+
+  const getRowStatus = (row) => {
+    const totalOwed = (row.rent || 0) + (row.water || 0);
+    const totalPaid = row.total_paid || 0;
+    const depositPaid = row.deposit > 0;
+
+    if (totalPaid >= totalOwed && depositPaid) {
+      return { color: "green", text: "✅ Paid", icon: <CheckCircleOutlined /> };
+    } else if (totalPaid > 0 && totalPaid < totalOwed) {
+      return {
+        color: "orange",
+        text: "⚠️ Partial",
+        icon: <ExclamationCircleOutlined />,
+      };
+    } else if (totalPaid === 0) {
+      return { color: "red", text: "❌ Unpaid", icon: <CloseCircleOutlined /> };
+    } else if (depositPaid) {
+      return {
+        color: "blue",
+        text: "💰 Deposit Only",
+        icon: <WalletOutlined />,
+      };
+    } else {
+      return {
+        color: "default",
+        text: "⏳ Pending",
+        icon: <ClockCircleOutlined />,
+      };
+    }
+  };
+
+  const paymentSummaryData = () => {
+    const monthlyData = {};
+
+    payments.forEach((p) => {
+      const month =
+        p.payment_for_month ||
+        (p.payment_date ? p.payment_date.substring(0, 7) : "unknown");
+
+      if (!monthlyData[month]) {
+        monthlyData[month] = {
+          month: month,
+          rent: 0,
+          water: 0,
+          deposit: 0,
+          excess: 0,
+          balance_due: 0,
+          total_paid: 0,
+          payment_count: 0,
+          receipts: [],
+        };
+      }
+
+      monthlyData[month].rent += p.rent_amount || 0;
+      monthlyData[month].water += p.water_amount || 0;
+      monthlyData[month].deposit += p.deposit_amount || 0;
+      monthlyData[month].excess += p.excess_amount || 0;
+      monthlyData[month].balance_due += p.balance_due || 0;
+      monthlyData[month].total_paid += p.amount;
+      monthlyData[month].payment_count += 1;
+      monthlyData[month].receipts.push(p.receipt_no);
+    });
+
+    const sortedData = Object.values(monthlyData)
+      .sort((a, b) => a.month.localeCompare(b.month))
+      .map((row) => ({
+        ...row,
+        monthDisplay:
+          row.month !== "unknown"
+            ? new Date(row.month + "-01").toLocaleString("default", {
+                month: "long",
+                year: "numeric",
+              })
+            : "Unknown",
+        status: getRowStatus(row),
+      }));
+
+    return sortedData;
+  };
+
+  const summaryTotals = () => {
+    const data = paymentSummaryData();
+    return data.reduce(
+      (acc, row) => {
+        acc.rent += row.rent || 0;
+        acc.water += row.water || 0;
+        acc.deposit += row.deposit || 0;
+        acc.excess += row.excess || 0;
+        acc.balance_due += row.balance_due || 0;
+        acc.total_paid += row.total_paid || 0;
+        return acc;
+      },
+      {
+        rent: 0,
+        water: 0,
+        deposit: 0,
+        excess: 0,
+        balance_due: 0,
+        total_paid: 0,
+      },
+    );
+  };
+
+  const summaryColumns = [
+    {
+      title: "Month",
+      dataIndex: "monthDisplay",
+      key: "month",
+      render: (text, record) => (
+        <div>
+          <div style={{ fontWeight: 600 }}>{text}</div>
+          <div style={{ fontSize: 12, color: "#8c8c8c" }}>
+            {record.payment_count} payment{record.payment_count > 1 ? "s" : ""}
+          </div>
+        </div>
+      ),
+      sorter: (a, b) => a.month.localeCompare(b.month),
+    },
+    {
+      title: "🏠 Rent",
+      dataIndex: "rent",
+      key: "rent",
+      render: (value) => (
+        <span style={{ color: "#1890ff", fontWeight: 500 }}>
+          {formatCurrency(value || 0)}
+        </span>
+      ),
+      sorter: (a, b) => (a.rent || 0) - (b.rent || 0),
+    },
+    {
+      title: "💧 Water",
+      dataIndex: "water",
+      key: "water",
+      render: (value) => (
+        <span style={{ color: "#52c41a", fontWeight: 500 }}>
+          {formatCurrency(value || 0)}
+        </span>
+      ),
+      sorter: (a, b) => (a.water || 0) - (b.water || 0),
+    },
+    {
+      title: "🏦 Deposit",
+      dataIndex: "deposit",
+      key: "deposit",
+      render: (value) => (
+        <span style={{ color: "#faad14", fontWeight: 500 }}>
+          {formatCurrency(value || 0)}
+        </span>
+      ),
+      sorter: (a, b) => (a.deposit || 0) - (b.deposit || 0),
+    },
+    {
+      title: "💰 Excess",
+      dataIndex: "excess",
+      key: "excess",
+      render: (value) => (
+        <span style={{ color: "#52c41a", fontWeight: 500 }}>
+          {value > 0 ? `+${formatCurrency(value)}` : "-"}
+        </span>
+      ),
+      sorter: (a, b) => (a.excess || 0) - (b.excess || 0),
+    },
+    {
+      title: "⚠️ Balance Due",
+      dataIndex: "balance_due",
+      key: "balance_due",
+      render: (value) => (
+        <span
+          style={{ color: value > 0 ? "#ff4d4f" : "#52c41a", fontWeight: 500 }}
+        >
+          {formatCurrency(value || 0)}
+        </span>
+      ),
+      sorter: (a, b) => (a.balance_due || 0) - (b.balance_due || 0),
+    },
+    {
+      title: "💰 Total Paid",
+      dataIndex: "total_paid",
+      key: "total_paid",
+      render: (value) => (
+        <span style={{ color: "#1890ff", fontWeight: 600 }}>
+          {formatCurrency(value || 0)}
+        </span>
+      ),
+      sorter: (a, b) => (a.total_paid || 0) - (b.total_paid || 0),
+    },
+    {
+      title: "Status",
+      key: "status",
+      render: (_, record) => (
+        <Tag color={record.status.color} icon={record.status.icon}>
+          {record.status.text}
+        </Tag>
+      ),
+    },
+  ];
+
+  const totals = summaryTotals();
+
   // Water Reading Columns
   const waterColumns = [
     {
       title: "Date",
-      dataIndex: "readingDate",
-      key: "readingDate",
+      dataIndex: "reading_date",
+      key: "reading_date",
       render: (date) => formatDate(date),
     },
     {
       title: "Previous",
-      dataIndex: "previousReading",
-      key: "previousReading",
-      render: (val) => <Tag color="blue">{val}</Tag>,
+      dataIndex: "previous_reading",
+      key: "previous_reading",
+      render: (val) => <Tag color="blue">{val || 0}</Tag>,
     },
     {
       title: "Current",
-      dataIndex: "currentReading",
-      key: "currentReading",
-      render: (val) => <Tag color="green">{val}</Tag>,
+      dataIndex: "current_reading",
+      key: "current_reading",
+      render: (val) => <Tag color="green">{val || 0}</Tag>,
     },
     {
       title: "Units Used",
-      dataIndex: "unitsUsed",
-      key: "unitsUsed",
-      render: (val) => <span style={{ fontWeight: 600 }}>{val} units</span>,
+      dataIndex: "units_used",
+      key: "units_used",
+      render: (val) => (
+        <span style={{ fontWeight: 600 }}>{val || 0} units</span>
+      ),
     },
     {
       title: "Amount",
       dataIndex: "amount",
       key: "amount",
-      render: (amount) => formatCurrency(amount),
+      render: (amount) => formatCurrency(amount || 0),
     },
     {
       title: "Status",
@@ -254,8 +595,8 @@ const TenantDetails = () => {
       key: "status",
       render: (status) => (
         <Badge
-          color={status === "billed" ? "green" : "orange"}
-          text={status === "billed" ? "Billed" : "Pending"}
+          color={status === "paid" ? "green" : "orange"}
+          text={status === "paid" ? "Paid" : "Pending"}
         />
       ),
     },
@@ -367,7 +708,7 @@ const TenantDetails = () => {
         <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
-              title="Expected Rent"
+              title="Monthly Rent"
               value={summary.expectedRent}
               prefix={<DollarOutlined />}
               formatter={(value) => formatCurrency(value)}
@@ -419,6 +760,53 @@ const TenantDetails = () => {
               percent={summary.paymentRate}
               status={summary.paymentRate >= 80 ? "success" : "active"}
               style={{ marginTop: 8 }}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Allocation Breakdown Cards */}
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+        <Col xs={24} sm={12} lg={6}>
+          <Card size="small" style={{ borderColor: "#1890ff" }}>
+            <Statistic
+              title="🏠 Rent Paid"
+              value={summary.totalRent}
+              formatter={(value) => formatCurrency(value)}
+              valueStyle={{ color: "#1890ff" }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card size="small" style={{ borderColor: "#52c41a" }}>
+            <Statistic
+              title="💧 Water Paid"
+              value={summary.totalWater}
+              formatter={(value) => formatCurrency(value)}
+              valueStyle={{ color: "#52c41a" }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card size="small" style={{ borderColor: "#faad14" }}>
+            <Statistic
+              title="🏦 Deposit Paid"
+              value={summary.totalDeposit}
+              formatter={(value) => formatCurrency(value)}
+              valueStyle={{ color: "#faad14" }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card
+            size="small"
+            style={{ borderColor: "#52c41a", background: "#f6ffed" }}
+          >
+            <Statistic
+              title="💰 Excess Credit"
+              value={summary.totalExcess}
+              formatter={(value) => `+${formatCurrency(value)}`}
+              valueStyle={{ color: "#52c41a" }}
             />
           </Card>
         </Col>
@@ -477,6 +865,7 @@ const TenantDetails = () => {
       {/* Tabs Section */}
       <Card>
         <Tabs defaultActiveKey="payments">
+          {/* Tab 1: Payment History */}
           <TabPane
             tab={
               <span>
@@ -515,6 +904,166 @@ const TenantDetails = () => {
             />
           </TabPane>
 
+          {/* Tab 2: Payment Summary */}
+          <TabPane
+            tab={
+              <span>
+                <PieChartOutlined />
+                Payment Summary
+              </span>
+            }
+            key="summary"
+          >
+            <Card
+              title={
+                <Space>
+                  <DollarOutlined style={{ color: "#1890ff" }} />
+                  <span>Payment Summary</span>
+                  <Tag color="blue">{paymentSummaryData().length} months</Tag>
+                  <Tag color="green">{tenant.name}</Tag>
+                </Space>
+              }
+              extra={
+                <Button
+                  icon={<ReloadOutlined />}
+                  onClick={fetchTenantData}
+                  loading={loading}
+                />
+              }
+            >
+              <Alert
+                message="📊 Payment Summary by Month"
+                description={`Shows rent, water, deposit, excess, and balance due for each month. Total paid: ${formatCurrency(totals.total_paid)}`}
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+              />
+
+              {/* Summary Cards */}
+              <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+                <Col span={6}>
+                  <Card size="small" style={{ background: "#f6ffed" }}>
+                    <Statistic
+                      title="💰 Total Paid"
+                      value={totals.total_paid}
+                      formatter={(value) => formatCurrency(value)}
+                      valueStyle={{ color: "#52c41a" }}
+                    />
+                  </Card>
+                </Col>
+                <Col span={6}>
+                  <Card size="small" style={{ background: "#e6f7ff" }}>
+                    <Statistic
+                      title="🏠 Rent Paid"
+                      value={totals.rent}
+                      formatter={(value) => formatCurrency(value)}
+                      valueStyle={{ color: "#1890ff" }}
+                    />
+                  </Card>
+                </Col>
+                <Col span={6}>
+                  <Card size="small" style={{ background: "#fff7e6" }}>
+                    <Statistic
+                      title="🏦 Deposit Paid"
+                      value={totals.deposit}
+                      formatter={(value) => formatCurrency(value)}
+                      valueStyle={{ color: "#faad14" }}
+                    />
+                  </Card>
+                </Col>
+                <Col span={6}>
+                  <Card size="small" style={{ background: "#fff2f0" }}>
+                    <Statistic
+                      title="⚠️ Balance Due"
+                      value={totals.balance_due}
+                      formatter={(value) => formatCurrency(value)}
+                      valueStyle={{ color: "#ff4d4f" }}
+                    />
+                  </Card>
+                </Col>
+              </Row>
+
+              <Table
+                columns={summaryColumns}
+                dataSource={paymentSummaryData()}
+                rowKey="month"
+                pagination={false}
+                summary={() => (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row style={{ background: "#fafafa" }}>
+                      <Table.Summary.Cell index={0}>
+                        <strong>TOTALS</strong>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={1}>
+                        <strong style={{ color: "#1890ff" }}>
+                          {formatCurrency(totals.rent)}
+                        </strong>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={2}>
+                        <strong style={{ color: "#52c41a" }}>
+                          {formatCurrency(totals.water)}
+                        </strong>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={3}>
+                        <strong style={{ color: "#faad14" }}>
+                          {formatCurrency(totals.deposit)}
+                        </strong>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={4}>
+                        <strong style={{ color: "#52c41a" }}>
+                          {formatCurrency(totals.excess)}
+                        </strong>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={5}>
+                        <strong style={{ color: "#ff4d4f" }}>
+                          {formatCurrency(totals.balance_due)}
+                        </strong>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={6}>
+                        <strong style={{ color: "#1890ff" }}>
+                          {formatCurrency(totals.total_paid)}
+                        </strong>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={7}>
+                        <strong>---</strong>
+                      </Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                )}
+              />
+
+              {/* Deposit Status */}
+              <Divider orientation="left">Deposit Status</Divider>
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Alert
+                    message={
+                      tenant?.deposit_paid
+                        ? "✅ Deposit Paid"
+                        : "⏳ Deposit Not Paid"
+                    }
+                    description={
+                      tenant?.deposit_paid_amount
+                        ? `Amount paid: ${formatCurrency(tenant.deposit_paid_amount)}`
+                        : "Deposit has not been paid yet"
+                    }
+                    type={tenant?.deposit_paid ? "success" : "warning"}
+                    showIcon
+                  />
+                </Col>
+                <Col span={12}>
+                  <Alert
+                    message="💰 Payment Summary"
+                    description={`Total rent expected: ${formatCurrency(tenant?.monthlyRent || 0)} per month`}
+                    type="info"
+                    showIcon
+                  />
+                </Col>
+              </Row>
+            </Card>
+          </TabPane>
+
+          {/* Tab 3: Water Readings */}
           <TabPane
             tab={
               <span>
@@ -535,6 +1084,7 @@ const TenantDetails = () => {
             />
           </TabPane>
 
+          {/* Tab 4: Statement */}
           <TabPane
             tab={
               <span>
@@ -566,6 +1116,18 @@ const TenantDetails = () => {
                     </Descriptions.Item>
                     <Descriptions.Item label="Total Paid">
                       {formatCurrency(summary.totalPaid)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="Rent Paid">
+                      {formatCurrency(summary.totalRent)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="Water Paid">
+                      {formatCurrency(summary.totalWater)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="Deposit Paid">
+                      {formatCurrency(summary.totalDeposit)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="Excess Credit">
+                      {formatCurrency(summary.totalExcess)}
                     </Descriptions.Item>
                     <Descriptions.Item label="Balance">
                       <span

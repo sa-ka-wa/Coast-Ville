@@ -97,6 +97,21 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // ✅ Add switchRole function
+  const switchRole = async (newRole) => {
+    try {
+      const response = await authService.switchRole(newRole);
+      setUser(response.data.user);
+      return { success: true, user: response.data.user };
+    } catch (error) {
+      console.error("Failed to switch role:", error);
+      return {
+        success: false,
+        error: error.message || "Failed to switch role",
+      };
+    }
+  };
+
   const value = {
     user,
     token,
@@ -106,9 +121,22 @@ export const AuthProvider = ({ children }) => {
     register,
     updateProfile,
     changePassword,
+    switchRole, // ✅ Add switchRole to the context value
     isAuthenticated: !!user,
     isAdmin: user?.role === "admin",
     isCaretaker: user?.role === "caretaker",
+    // ✅ Add helper to check if user has multiple roles
+    hasMultipleRoles:
+      user?.secondary_role !== null && user?.secondary_role !== undefined,
+    // ✅ Get available roles
+    getAvailableRoles: () => {
+      if (!user) return [];
+      const roles = [user.role];
+      if (user.secondary_role) {
+        roles.push(user.secondary_role);
+      }
+      return roles;
+    },
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

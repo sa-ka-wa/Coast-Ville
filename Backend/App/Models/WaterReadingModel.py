@@ -19,15 +19,14 @@ class WaterReading(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationships
-    tenant = db.relationship('Tenant', backref='water_readings')
+    tenant = db.relationship('Tenant', back_populates='water_readings')
 
     def to_dict(self):
         return {
             'id': self.id,
             'tenant_id': self.tenant_id,
             'tenant_name': self.tenant.name if self.tenant else None,
-            'house_no': self.tenant.house_no if self.tenant else None,
+            'house_no': self.tenant.unit.unit_number if self.tenant and self.tenant.unit else None,
             'previous_reading': self.previous_reading,
             'current_reading': self.current_reading,
             'units_used': self.units_used,
@@ -54,8 +53,26 @@ class WaterBill(db.Model):
     garbage_charge = db.Column(db.Float, default=300)
     total = db.Column(db.Float)
     status = db.Column(db.String(20), default='pending')
-
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Water bill tracking fields
+    paid_amount = db.Column(db.Float, default=0)
+    total_remaining = db.Column(db.Float, default=0)
+    paid_at = db.Column(db.DateTime)
+    payment_id = db.Column(db.Integer, db.ForeignKey('payments.id'))
+
+    # ✅ Relationships - NO back_populates
+    property = db.relationship('Property', back_populates='water_bills')
+    tenant = db.relationship('Tenant', back_populates='water_bills')
+    unit = db.relationship('Unit', back_populates='water_bills')
+
+    # ✅ Payment relationship - WITHOUT back_populates
+    payment = db.relationship(
+        'Payment',
+        foreign_keys=[payment_id],
+        uselist=False
+        # ✅ REMOVED: back_populates='water_bill'
+    )
 
     def to_dict(self):
         return {
@@ -69,7 +86,11 @@ class WaterBill(db.Model):
             'waterCharge': self.water_charge,
             'garbageCharge': self.garbage_charge,
             'total': self.total,
-            'status': self.status
+            'status': self.status,
+            'paid_amount': self.paid_amount,
+            'total_remaining': self.total_remaining,
+            'paid_at': self.paid_at.isoformat() if self.paid_at else None,
+            'payment_id': self.payment_id
         }
 
 
@@ -89,6 +110,8 @@ class Expense(db.Model):
     status = db.Column(db.String(20), default='pending')
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    property = db.relationship('Property', back_populates='expenses')
 
     def to_dict(self):
         return {

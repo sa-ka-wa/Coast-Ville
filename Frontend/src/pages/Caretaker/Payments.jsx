@@ -49,6 +49,12 @@ import {
   CopyOutlined,
   CheckOutlined,
   TeamOutlined,
+  ExclamationCircleOutlined,
+  ClockCircleOutlined,
+  PieChartOutlined,
+  SwapOutlined,
+  RollbackOutlined,
+  DropboxOutlined,
 } from "@ant-design/icons";
 import {
   getPayments,
@@ -59,6 +65,10 @@ import {
   getPaymentStats,
   generateReceipt,
   sendReceipt,
+  processPaymentAllocation,
+  getPaymentAllocation,
+  movePaymentToTenant,
+  reversePayment,
 } from "../../services/payments";
 import { getTenants } from "../../services/tenants";
 import { useProperty } from "../../context/PropertyContext";
@@ -92,36 +102,41 @@ const Payments = () => {
   const [form] = Form.useForm();
   const [activeTab, setActiveTab] = useState("manual");
 
+  // Match modal state
+  const [matchModalVisible, setMatchModalVisible] = useState(false);
+  const [matchLoading, setMatchLoading] = useState(false);
+  const [matchedTenants, setMatchedTenants] = useState([]);
+
+  // Allocation state
+  const [allocationModalVisible, setAllocationModalVisible] = useState(false);
+  const [selectedPaymentAllocation, setSelectedPaymentAllocation] =
+    useState(null);
+  const [allocationLoading, setAllocationLoading] = useState(false);
+
+  // Move payment state
+  const [moveModalVisible, setMoveModalVisible] = useState(false);
+  const [moveLoading, setMoveLoading] = useState(false);
+
+  // Reverse payment state
+  const [reverseModalVisible, setReverseModalVisible] = useState(false);
+  const [reverseLoading, setReverseLoading] = useState(false);
+  const [reverseReason, setReverseReason] = useState("");
+
   // M-Pesa parsing state
   const [mpesaMessage, setMpesaMessage] = useState("");
   const [parsedData, setParsedData] = useState(null);
-  const [matchedTenants, setMatchedTenants] = useState([]);
   const [parsingLoading, setParsingLoading] = useState(false);
   const [matchingLoading, setMatchingLoading] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
 
-  // Debug - log when activeProperty changes
-  useEffect(() => {
-    console.log("🔍 Payments - activeProperty changed:", activeProperty);
-    console.log("📊 Property details:", {
-      id: activeProperty?.id,
-      name: activeProperty?.name,
-      address: activeProperty?.address,
-      city: activeProperty?.city,
-      total_units: activeProperty?.total_units,
-    });
-  }, [activeProperty]);
-
-  // Get current property ID - same as MeterReadings
+  // Get current property ID
   const currentPropertyId = activeProperty?.id;
 
   useEffect(() => {
-    console.log("🔄 Payments - currentPropertyId changed:", currentPropertyId);
     if (currentPropertyId) {
       fetchData();
     } else {
-      // Clear data if no property selected
       setPayments([]);
       setFilteredPayments([]);
       setTenants([]);
@@ -140,22 +155,17 @@ const Payments = () => {
       return;
     }
 
-    console.log("📡 Fetching payments for property:", currentPropertyId);
-
     setLoading(true);
     try {
-      // Fetch tenants for the current property
       const tenantsRes = await getTenants({ property_id: currentPropertyId });
       const tenantsList = tenantsRes.data || [];
       setTenants(tenantsList);
 
-      // Fetch payments for the current property
       const paymentsRes = await getPayments({ property_id: currentPropertyId });
       const paymentsList = paymentsRes.data || [];
       setPayments(paymentsList);
       setFilteredPayments(paymentsList);
 
-      // Fetch payment stats for the current property
       const statsRes = await getPaymentStats({
         property_id: currentPropertyId,
       });
@@ -177,7 +187,8 @@ const Payments = () => {
         (p) =>
           (p.tenantName || "").toLowerCase().includes(search) ||
           (p.receipt_no || "").toLowerCase().includes(search) ||
-          (p.mpesa_code || "").toLowerCase().includes(search),
+          (p.mpesa_code || "").toLowerCase().includes(search) ||
+          (p.account_reference || "").toLowerCase().includes(search),
       );
     }
 
@@ -283,10 +294,10 @@ const Payments = () => {
       const response = await matchPayment({
         amount: data.amount,
         phone: data.phone,
+        sender: data.sender,
       });
-      const matches = response.data.matched_tenants || [];
+      const matches = response.data.candidates || [];
 
-      // Filter matches by current property
       const propertyMatches = matches.filter(
         (tenant) => tenant.property_id === currentPropertyId,
       );
@@ -331,6 +342,7 @@ const Payments = () => {
         payment_method: "mpesa",
         mpesa_code: parsedData.mpesa_code || parsedData.till_number,
         payment_for_month: dayjs().format("YYYY-MM-DD"),
+        phone: parsedData.phone,
         notes: `M-Pesa payment from ${parsedData.sender || "Unknown"}\n${mpesaMessage.substring(0, 500)}`,
       };
 
@@ -369,6 +381,156 @@ const Payments = () => {
     }
   };
 
+  // Match Payment from Table
+  const handleMatchPayment = async (payment) => {
+    try {
+      setSelectedPayment(payment);
+      setMatchLoading(true);
+
+      const response = await matchPayment({
+        amount: payment.amount,
+        phone: payment.phone_number,
+        house_no: payment.account_reference,
+        property_id: currentPropertyId,
+      });
+
+      const candidates = response.data.candidates || [];
+
+      if (candidates.length === 0) {
+        Modal.info({
+          title: "🔍 No Automatic Match Found",
+          content: (
+            <div>
+              <p>No tenants were automatically matched to this payment.</p>
+              <p style={{ marginTop: 8 }}>
+                <strong>Payment Details:</strong>
+              </p>
+              <p>Amount: {formatCurrency(payment.amount)}</p>
+              <p>House: {payment.account_reference || "N/A"}</p>
+              <p>Phone: {payment.phone_number || "N/A"}</p>
+              <p style={{ marginTop: 8, color: "#faad14" }}>
+                Please select a tenant manually from the list.
+              </p>
+            </div>
+          ),
+          okText: "Show All Tenants",
+          onOk: () => {
+            setMatchedTenants(tenants.map((t) => ({ ...t, match_score: 0 })));
+            setMatchModalVisible(true);
+          },
+        });
+        setMatchLoading(false);
+        return;
+      }
+
+      setMatchedTenants(candidates);
+      setMatchModalVisible(true);
+      setMatchLoading(false);
+    } catch (error) {
+      console.error("Error matching payment:", error);
+      message.error("Failed to search for matching tenants");
+      setMatchLoading(false);
+    }
+  };
+
+  const handleConfirmMatch = async (paymentId, tenantId) => {
+    setMatchLoading(true);
+    try {
+      await confirmPayment({
+        payment_id: paymentId,
+        tenant_id: tenantId,
+      });
+
+      message.success("✅ Payment matched successfully!");
+      setMatchModalVisible(false);
+      setMatchedTenants([]);
+      setSelectedPayment(null);
+      fetchData();
+    } catch (error) {
+      console.error("Error matching payment:", error);
+      message.error("Failed to match payment");
+    } finally {
+      setMatchLoading(false);
+    }
+  };
+
+  // Payment Allocation Handlers
+  const handleAllocatePayment = async (paymentId) => {
+    setAllocationLoading(true);
+    try {
+      const response = await processPaymentAllocation(paymentId);
+      if (response.data.success) {
+        message.success("✅ Payment allocated successfully!");
+        fetchData();
+        // Show allocation details
+        await handleViewAllocation(paymentId);
+      } else {
+        message.error(response.data.message || "Failed to allocate payment");
+      }
+    } catch (error) {
+      console.error("Error allocating payment:", error);
+      message.error("Failed to allocate payment");
+    } finally {
+      setAllocationLoading(false);
+    }
+  };
+
+  const handleViewAllocation = async (paymentId) => {
+    try {
+      const response = await getPaymentAllocation(paymentId);
+      setSelectedPaymentAllocation(response.data);
+      setAllocationModalVisible(true);
+    } catch (error) {
+      console.error("Error getting allocation:", error);
+      message.error("Failed to get allocation details");
+    }
+  };
+
+  // Move Payment Handler
+  const handleMovePayment = async (paymentId, newTenantId, reason) => {
+    setMoveLoading(true);
+    try {
+      const response = await movePaymentToTenant(
+        paymentId,
+        newTenantId,
+        reason,
+      );
+      if (response.data.success) {
+        message.success("✅ Payment moved successfully!");
+        setMoveModalVisible(false);
+        fetchData();
+      } else {
+        message.error(response.data.message || "Failed to move payment");
+      }
+    } catch (error) {
+      console.error("Error moving payment:", error);
+      message.error("Failed to move payment");
+    } finally {
+      setMoveLoading(false);
+    }
+  };
+
+  // Reverse Payment Handler
+  const handleReversePayment = async (paymentId) => {
+    setReverseLoading(true);
+    try {
+      const response = await reversePayment(paymentId, reverseReason);
+      if (response.data.success) {
+        message.success("✅ Payment reversed successfully!");
+        setReverseModalVisible(false);
+        setReverseReason("");
+        fetchData();
+      } else {
+        message.error(response.data.message || "Failed to reverse payment");
+      }
+    } catch (error) {
+      console.error("Error reversing payment:", error);
+      message.error("Failed to reverse payment");
+    } finally {
+      setReverseLoading(false);
+    }
+  };
+
   const handleViewReceipt = async (paymentId) => {
     try {
       const response = await generateReceipt(paymentId);
@@ -380,29 +542,43 @@ const Payments = () => {
     }
   };
 
-  const getStatusColor = (status) => {
+  const getStatusBadge = (status) => {
     switch (status) {
       case "paid":
-        return "green";
+        return (
+          <Badge
+            status="success"
+            text={
+              <span style={{ color: "#52c41a", fontWeight: 500 }}>
+                <CheckCircleOutlined /> Confirmed
+              </span>
+            }
+          />
+        );
       case "pending":
-        return "orange";
+        return (
+          <Badge
+            status="warning"
+            text={
+              <span style={{ color: "#faad14", fontWeight: 500 }}>
+                <ClockCircleOutlined /> Pending Match
+              </span>
+            }
+          />
+        );
       case "failed":
-        return "red";
+        return (
+          <Badge
+            status="error"
+            text={
+              <span style={{ color: "#ff4d4f", fontWeight: 500 }}>
+                <ExclamationCircleOutlined /> Failed
+              </span>
+            }
+          />
+        );
       default:
-        return "default";
-    }
-  };
-
-  const getStatusLabel = (status) => {
-    switch (status) {
-      case "paid":
-        return "Paid";
-      case "pending":
-        return "Pending";
-      case "failed":
-        return "Failed";
-      default:
-        return status || "N/A";
+        return <Badge status="default" text="Unknown" />;
     }
   };
 
@@ -411,21 +587,28 @@ const Payments = () => {
       title: "Receipt",
       dataIndex: "receipt_no",
       key: "receipt_no",
-      render: (text) => <Tag color="blue">{text}</Tag>,
+      render: (text) => <Tag color="blue">{text || "N/A"}</Tag>,
     },
     {
-      title: "Tenant",
+      title: "Tenant / House",
       key: "tenant",
       render: (_, record) => (
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Avatar size="small" style={{ backgroundColor: "#1890ff" }}>
-            {(record.tenantName || "U")[0].toUpperCase()}
+          <Avatar
+            size="small"
+            style={{
+              backgroundColor: record.status === "paid" ? "#52c41a" : "#faad14",
+            }}
+          >
+            {record.tenantName ? record.tenantName[0].toUpperCase() : "?"}
           </Avatar>
           <div>
-            <div style={{ fontWeight: 500 }}>{record.tenantName || "N/A"}</div>
+            <div style={{ fontWeight: 500 }}>
+              {record.tenantName || "⚠️ Unmatched"}
+            </div>
             <div style={{ fontSize: 12, color: "#8c8c8c" }}>
               <HomeOutlined style={{ marginRight: 4 }} />
-              {record.houseNo || "N/A"}
+              House: {record.account_reference || record.houseNo || "N/A"}
             </div>
           </div>
         </div>
@@ -436,7 +619,7 @@ const Payments = () => {
       dataIndex: "amount",
       key: "amount",
       render: (amount) => (
-        <span style={{ fontWeight: 600, color: "#52c41a" }}>
+        <span style={{ fontWeight: 600, color: "#1890ff" }}>
           {formatCurrency(amount)}
         </span>
       ),
@@ -467,6 +650,12 @@ const Payments = () => {
       render: (text) => text || "N/A",
     },
     {
+      title: "Phone",
+      dataIndex: "phone_number",
+      key: "phone_number",
+      render: (text) => text || "N/A",
+    },
+    {
       title: "Date",
       dataIndex: "payment_date",
       key: "payment_date",
@@ -477,40 +666,102 @@ const Payments = () => {
       title: "Status",
       dataIndex: "status",
       key: "status",
-      render: (status) => (
-        <Badge color={getStatusColor(status)} text={getStatusLabel(status)} />
-      ),
+      render: (status) => getStatusBadge(status),
+      sorter: (a, b) => {
+        const order = { paid: 1, pending: 2, failed: 3 };
+        return order[a.status] - order[b.status];
+      },
     },
     {
       title: "Actions",
       key: "actions",
-      width: 120,
+      width: 280,
       render: (_, record) => (
-        <Space>
-          <Tooltip title="View Receipt">
-            <Button
-              icon={<EyeOutlined />}
-              size="small"
-              onClick={() => handleViewReceipt(record.id)}
-            />
-          </Tooltip>
-          {record.status === "paid" && (
-            <Tooltip title="Send Receipt">
-              <Button
-                icon={<WhatsAppOutlined />}
-                size="small"
-                onClick={() =>
-                  sendReceipt({ payment_id: record.id, method: "whatsapp" })
-                }
-              />
-            </Tooltip>
+        <Space wrap>
+          {record.status === "pending" ? (
+            <>
+              <Tooltip title="Match to Tenant">
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<CheckOutlined />}
+                  onClick={() => handleMatchPayment(record)}
+                >
+                  Match
+                </Button>
+              </Tooltip>
+              <Tooltip title="Allocate Payment">
+                <Button
+                  size="small"
+                  icon={<DollarOutlined />}
+                  onClick={() => handleAllocatePayment(record.id)}
+                  loading={allocationLoading}
+                />
+              </Tooltip>
+            </>
+          ) : (
+            <>
+              <Tooltip title="View Receipt">
+                <Button
+                  icon={<EyeOutlined />}
+                  size="small"
+                  onClick={() => handleViewReceipt(record.id)}
+                />
+              </Tooltip>
+              <Tooltip title="View Allocation">
+                <Button
+                  icon={<PieChartOutlined />}
+                  size="small"
+                  onClick={() => handleViewAllocation(record.id)}
+                />
+              </Tooltip>
+              <Tooltip title="Allocate Payment">
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<DollarOutlined />}
+                  onClick={() => handleAllocatePayment(record.id)}
+                  loading={allocationLoading}
+                />
+              </Tooltip>
+              <Tooltip title="Move to Different Tenant">
+                <Button
+                  size="small"
+                  icon={<SwapOutlined />}
+                  onClick={() => {
+                    setSelectedPayment(record);
+                    setMoveModalVisible(true);
+                  }}
+                />
+              </Tooltip>
+              <Tooltip title="Send Receipt">
+                <Button
+                  icon={<WhatsAppOutlined />}
+                  size="small"
+                  onClick={() =>
+                    sendReceipt({ payment_id: record.id, method: "whatsapp" })
+                  }
+                />
+              </Tooltip>
+              <Tooltip title="Reverse/Refund">
+                <Button
+                  danger
+                  size="small"
+                  icon={<RollbackOutlined />}
+                  onClick={() => {
+                    setSelectedPayment(record);
+                    setReverseModalVisible(true);
+                  }}
+                />
+              </Tooltip>
+            </>
           )}
         </Space>
       ),
     },
   ];
 
-  // Show message if no property selected - same as MeterReadings
+  // Show message if no property selected
   if (!currentPropertyId) {
     return (
       <div style={{ textAlign: "center", padding: "60px 20px" }}>
@@ -524,7 +775,7 @@ const Payments = () => {
     );
   }
 
-  // Show loading state while fetching
+  // Show loading state
   if (loading && payments.length === 0) {
     return (
       <div style={{ textAlign: "center", padding: "40px" }}>
@@ -534,34 +785,15 @@ const Payments = () => {
     );
   }
 
+  // Calculate payment stats
+  const totalPayments = payments.length;
+  const confirmedCount = payments.filter((p) => p.status === "paid").length;
+  const pendingCount = payments.filter((p) => p.status === "pending").length;
+  const failedCount = payments.filter((p) => p.status === "failed").length;
+
   return (
     <div>
-      {/* Debug info - shows current property ID and name */}
-      <div
-        style={{
-          background: "#f0f0f0",
-          padding: "8px 16px",
-          marginBottom: "16px",
-          borderRadius: "4px",
-          fontSize: "12px",
-          color: "#666",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <span>
-          🏠 Debug: Property ID: {currentPropertyId || "None"} | Name:{" "}
-          {activeProperty?.name || "None"}
-        </span>
-        <span style={{ color: "#999" }}>
-          Address: {activeProperty?.address || "N/A"} | City:{" "}
-          {activeProperty?.city || "N/A"} | Units:{" "}
-          {activeProperty?.total_units || "N/A"}
-        </span>
-      </div>
-
-      {/* Property Header - Same as MeterReadings */}
+      {/* Property Header */}
       <Card
         style={{
           marginBottom: 24,
@@ -632,6 +864,43 @@ const Payments = () => {
         </Col>
       </Row>
 
+      {/* Payment Status Summary */}
+      <Card style={{ marginBottom: 16, background: "#fafafa" }}>
+        <Row gutter={16}>
+          <Col xs={24} sm={6}>
+            <Statistic
+              title="📊 Total Payments"
+              value={totalPayments}
+              prefix={<DollarOutlined />}
+            />
+          </Col>
+          <Col xs={24} sm={6}>
+            <Statistic
+              title="✅ Confirmed (Auto-Matched)"
+              value={confirmedCount}
+              valueStyle={{ color: "#52c41a" }}
+              prefix={<CheckCircleOutlined />}
+            />
+          </Col>
+          <Col xs={24} sm={6}>
+            <Statistic
+              title="⏳ Pending (Need Match)"
+              value={pendingCount}
+              valueStyle={{ color: "#faad14" }}
+              prefix={<ClockCircleOutlined />}
+            />
+          </Col>
+          <Col xs={24} sm={6}>
+            <Statistic
+              title="❌ Failed"
+              value={failedCount}
+              valueStyle={{ color: "#ff4d4f" }}
+              prefix={<ExclamationCircleOutlined />}
+            />
+          </Col>
+        </Row>
+      </Card>
+
       {/* Payment Table */}
       <Card
         title={
@@ -680,23 +949,23 @@ const Payments = () => {
           }}
         >
           <Input
-            placeholder="Search by tenant, receipt or reference..."
+            placeholder="Search by tenant, house, receipt..."
             prefix={<SearchOutlined />}
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
-            style={{ width: 250 }}
+            style={{ width: 280 }}
             allowClear
           />
           <Select
             value={statusFilter}
             onChange={setStatusFilter}
-            style={{ width: 150 }}
+            style={{ width: 160 }}
             placeholder="Filter by status"
           >
             <Option value="all">All Status</Option>
-            <Option value="paid">Paid</Option>
-            <Option value="pending">Pending</Option>
-            <Option value="failed">Failed</Option>
+            <Option value="paid">✅ Confirmed</Option>
+            <Option value="pending">⏳ Pending</Option>
+            <Option value="failed">❌ Failed</Option>
           </Select>
           <Select
             value={methodFilter}
@@ -727,7 +996,7 @@ const Payments = () => {
             showTotal: (total) => `Total ${total} payments`,
             pageSizeOptions: ["10", "20", "50"],
           }}
-          scroll={{ x: 1000 }}
+          scroll={{ x: 1300 }}
           locale={{
             emptyText: (
               <Empty
@@ -933,7 +1202,7 @@ const Payments = () => {
 
 Example:
 Confirmed. KSh 15,000 received from JOHN MWANGI on 1/7/2026 at 10:30 AM.
-Paybill: 123456, Account: RENT-001. Code: THG2JK9A1M.`}
+Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
                 value={mpesaMessage}
                 onChange={(e) => setMpesaMessage(e.target.value)}
                 style={{ fontSize: 14 }}
@@ -1064,10 +1333,10 @@ Paybill: 123456, Account: RENT-001. Code: THG2JK9A1M.`}
                       <List.Item.Meta
                         avatar={
                           <Avatar style={{ backgroundColor: "#1890ff" }}>
-                            {tenant.name[0]}
+                            {tenant.name?.[0] || "?"}
                           </Avatar>
                         }
-                        title={<strong>{tenant.name}</strong>}
+                        title={<strong>{tenant.name || "Unknown"}</strong>}
                         description={
                           <Space>
                             <span>🏠 House: {tenant.house_no || "N/A"}</span>
@@ -1075,8 +1344,10 @@ Paybill: 123456, Account: RENT-001. Code: THG2JK9A1M.`}
                             <span>
                               💰 Balance: {formatCurrency(tenant.balance || 0)}
                             </span>
-                            <span>|</span>
-                            <span>🎯 Match: {tenant.match_score || 0}%</span>
+                            {tenant.match_score > 0 && <span>|</span>}
+                            {tenant.match_score > 0 && (
+                              <span>🎯 Match: {tenant.match_score}%</span>
+                            )}
                           </Space>
                         }
                       />
@@ -1138,6 +1409,488 @@ Paybill: 123456, Account: RENT-001. Code: THG2JK9A1M.`}
             )}
           </TabPane>
         </Tabs>
+      </Modal>
+
+      {/* Match Tenant Modal */}
+      <Modal
+        title={
+          <Space>
+            <UserOutlined style={{ color: "#1890ff" }} />
+            Match Payment to Tenant
+          </Space>
+        }
+        open={matchModalVisible}
+        onCancel={() => {
+          setMatchModalVisible(false);
+          setMatchedTenants([]);
+          setSelectedPayment(null);
+        }}
+        footer={null}
+        width={700}
+      >
+        {selectedPayment && (
+          <>
+            <Alert
+              message="⏳ Unmatched Payment"
+              description={
+                <div style={{ marginTop: 8 }}>
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <p>
+                        <strong>Amount:</strong>{" "}
+                        {formatCurrency(selectedPayment.amount)}
+                      </p>
+                      <p>
+                        <strong>House Number:</strong>{" "}
+                        {selectedPayment.account_reference || "N/A"}
+                      </p>
+                    </Col>
+                    <Col span={12}>
+                      <p>
+                        <strong>Phone:</strong>{" "}
+                        {selectedPayment.phone_number || "N/A"}
+                      </p>
+                      <p>
+                        <strong>M-Pesa Code:</strong>{" "}
+                        {selectedPayment.mpesa_code || "N/A"}
+                      </p>
+                    </Col>
+                  </Row>
+                </div>
+              }
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+
+            <Divider>Select Tenant</Divider>
+
+            {matchedTenants.length === 0 ? (
+              <Empty description="No matching tenants found">
+                <Button
+                  type="primary"
+                  onClick={() => {
+                    setMatchedTenants(
+                      tenants.map((t) => ({ ...t, match_score: 0 })),
+                    );
+                  }}
+                >
+                  Show All Tenants
+                </Button>
+              </Empty>
+            ) : (
+              <List
+                dataSource={matchedTenants}
+                renderItem={(tenant) => (
+                  <List.Item
+                    actions={[
+                      <Button
+                        type="primary"
+                        size="small"
+                        loading={matchLoading}
+                        onClick={() =>
+                          handleConfirmMatch(selectedPayment.id, tenant.id)
+                        }
+                        icon={<CheckOutlined />}
+                      >
+                        Match
+                      </Button>,
+                    ]}
+                  >
+                    <List.Item.Meta
+                      avatar={
+                        <Avatar style={{ backgroundColor: "#1890ff" }}>
+                          {tenant.name?.[0] || "?"}
+                        </Avatar>
+                      }
+                      title={
+                        <Space>
+                          <strong>{tenant.name || "Unknown"}</strong>
+                          {tenant.match_score > 0 && (
+                            <Tag color="blue">{tenant.match_score}% match</Tag>
+                          )}
+                          {tenant.status === "active" ? (
+                            <Tag color="green">Active</Tag>
+                          ) : (
+                            <Tag color="red">Inactive</Tag>
+                          )}
+                        </Space>
+                      }
+                      description={
+                        <Space direction="vertical" size={0}>
+                          <span>
+                            🏠 House:{" "}
+                            {tenant.houseNo || tenant.house_no || "N/A"}
+                          </span>
+                          <span>📱 Phone: {tenant.phone || "N/A"}</span>
+                          <span style={{ color: "#52c41a" }}>
+                            Balance: {formatCurrency(tenant.balance || 0)}
+                          </span>
+                        </Space>
+                      }
+                    />
+                  </List.Item>
+                )}
+              />
+            )}
+
+            <Divider />
+
+            <div style={{ textAlign: "center" }}>
+              <Button onClick={() => setMatchModalVisible(false)}>
+                Cancel
+              </Button>
+            </div>
+          </>
+        )}
+      </Modal>
+
+      {/* Allocation Modal */}
+      <Modal
+        title={
+          <Space>
+            <PieChartOutlined style={{ color: "#1890ff" }} />
+            Payment Allocation Details
+          </Space>
+        }
+        open={allocationModalVisible}
+        onCancel={() => {
+          setAllocationModalVisible(false);
+          setSelectedPaymentAllocation(null);
+        }}
+        footer={
+          <Button onClick={() => setAllocationModalVisible(false)}>
+            Close
+          </Button>
+        }
+        width={700}
+      >
+        {selectedPaymentAllocation && (
+          <div>
+            <Card size="small" style={{ marginBottom: 16 }}>
+              <Descriptions bordered column={2}>
+                <Descriptions.Item label="Payment ID">
+                  {selectedPaymentAllocation.payment?.id}
+                </Descriptions.Item>
+                <Descriptions.Item label="Tenant">
+                  {selectedPaymentAllocation.payment?.tenantName}
+                </Descriptions.Item>
+                <Descriptions.Item label="Amount">
+                  <strong style={{ color: "#1890ff" }}>
+                    {formatCurrency(selectedPaymentAllocation.payment?.amount)}
+                  </strong>
+                </Descriptions.Item>
+                <Descriptions.Item label="Status">
+                  <Badge
+                    color={
+                      selectedPaymentAllocation.payment?.status === "paid"
+                        ? "#52c41a"
+                        : "#faad14"
+                    }
+                    text={selectedPaymentAllocation.payment?.status}
+                  />
+                </Descriptions.Item>
+              </Descriptions>
+            </Card>
+
+            <Divider>Allocation Breakdown</Divider>
+
+            <Row gutter={[16, 16]}>
+              {selectedPaymentAllocation.allocations?.rent > 0 && (
+                <Col span={12}>
+                  <Card size="small" style={{ borderColor: "#1890ff" }}>
+                    <Statistic
+                      title="🏠 Rent"
+                      value={selectedPaymentAllocation.allocations.rent}
+                      formatter={(value) => formatCurrency(value)}
+                      valueStyle={{ color: "#1890ff" }}
+                    />
+                  </Card>
+                </Col>
+              )}
+
+              {selectedPaymentAllocation.allocations?.water > 0 && (
+                <Col span={12}>
+                  <Card size="small" style={{ borderColor: "#52c41a" }}>
+                    <Statistic
+                      title="💧 Water"
+                      value={selectedPaymentAllocation.allocations.water}
+                      formatter={(value) => formatCurrency(value)}
+                      valueStyle={{ color: "#52c41a" }}
+                    />
+                  </Card>
+                </Col>
+              )}
+
+              {selectedPaymentAllocation.allocations?.deposit > 0 && (
+                <Col span={12}>
+                  <Card size="small" style={{ borderColor: "#faad14" }}>
+                    <Statistic
+                      title="🏦 Deposit"
+                      value={selectedPaymentAllocation.allocations.deposit}
+                      formatter={(value) => formatCurrency(value)}
+                      valueStyle={{ color: "#faad14" }}
+                    />
+                  </Card>
+                </Col>
+              )}
+
+              {selectedPaymentAllocation.allocations?.excess > 0 && (
+                <Col span={12}>
+                  <Card
+                    size="small"
+                    style={{
+                      borderColor: "#52c41a",
+                      background: "#f6ffed",
+                    }}
+                  >
+                    <Statistic
+                      title="💰 Credit Next Month"
+                      value={selectedPaymentAllocation.allocations.excess}
+                      formatter={(value) => `+${formatCurrency(value)}`}
+                      valueStyle={{ color: "#52c41a" }}
+                    />
+                  </Card>
+                </Col>
+              )}
+
+              {selectedPaymentAllocation.allocations?.balance_due > 0 && (
+                <Col span={12}>
+                  <Card
+                    size="small"
+                    style={{
+                      borderColor: "#ff4d4f",
+                      background: "#fff2f0",
+                    }}
+                  >
+                    <Statistic
+                      title="⚠️ Balance Due"
+                      value={selectedPaymentAllocation.allocations.balance_due}
+                      formatter={(value) => formatCurrency(value)}
+                      valueStyle={{ color: "#ff4d4f" }}
+                    />
+                  </Card>
+                </Col>
+              )}
+            </Row>
+
+            {selectedPaymentAllocation.allocations?.credited_to_next_month && (
+              <Alert
+                message="💰 Credit Applied to Next Month"
+                description="This payment has excess that will be applied to next month's rent automatically."
+                type="success"
+                showIcon
+                style={{ marginTop: 16 }}
+              />
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* Move Payment Modal */}
+      <Modal
+        title={
+          <Space>
+            <SwapOutlined style={{ color: "#1890ff" }} />
+            Move Payment to Different Tenant
+          </Space>
+        }
+        open={moveModalVisible}
+        onCancel={() => {
+          setMoveModalVisible(false);
+          setSelectedPayment(null);
+        }}
+        footer={null}
+        width={600}
+      >
+        {selectedPayment && (
+          <>
+            <Alert
+              message="🏠 Move Payment to Correct Tenant"
+              description={`Payment of ${formatCurrency(selectedPayment.amount)} is currently assigned to ${selectedPayment.tenantName} (House ${selectedPayment.houseNo})`}
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+
+            <Form
+              onFinish={(values) =>
+                handleMovePayment(
+                  selectedPayment.id,
+                  values.tenant_id,
+                  values.reason,
+                )
+              }
+            >
+              <Form.Item
+                name="tenant_id"
+                label="Select Correct Tenant"
+                rules={[{ required: true, message: "Please select a tenant" }]}
+              >
+                <Select
+                  placeholder="Search correct tenant"
+                  showSearch
+                  optionFilterProp="children"
+                  size="large"
+                >
+                  {tenants
+                    .filter((t) => t.id !== selectedPayment.tenant_id)
+                    .map((tenant) => (
+                      <Option key={tenant.id} value={tenant.id}>
+                        {tenant.name} - House {tenant.houseNo}
+                      </Option>
+                    ))}
+                </Select>
+              </Form.Item>
+
+              <Form.Item
+                name="reason"
+                label="Reason"
+                initialValue="wrong_house"
+              >
+                <Select placeholder="Select reason" size="large">
+                  <Option value="wrong_house">
+                    Wrong house number entered
+                  </Option>
+                  <Option value="tenant_moved">
+                    Tenant moved to different house
+                  </Option>
+                  <Option value="mistake">Caretaker error</Option>
+                  <Option value="other">Other</Option>
+                </Select>
+              </Form.Item>
+
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: 8,
+                }}
+              >
+                <Button onClick={() => setMoveModalVisible(false)}>
+                  Cancel
+                </Button>
+                <Button type="primary" htmlType="submit" loading={moveLoading}>
+                  Move Payment
+                </Button>
+              </div>
+            </Form>
+          </>
+        )}
+      </Modal>
+
+      {/* Reverse Payment Modal */}
+      <Modal
+        title={
+          <Space>
+            <RollbackOutlined style={{ color: "#ff4d4f" }} />
+            Reverse/Refund Payment
+          </Space>
+        }
+        open={reverseModalVisible}
+        onCancel={() => {
+          setReverseModalVisible(false);
+          setSelectedPayment(null);
+          setReverseReason("");
+        }}
+        footer={null}
+        width={600}
+      >
+        {selectedPayment && (
+          <>
+            <Alert
+              message="⚠️ Payment Reversal"
+              description={
+                <div>
+                  <p style={{ color: "#ff4d4f" }}>
+                    This action will reverse the payment and refund the tenant's
+                    balance.
+                  </p>
+                  <Divider />
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <p>
+                        <strong>Amount:</strong>{" "}
+                        {formatCurrency(selectedPayment.amount)}
+                      </p>
+                      <p>
+                        <strong>Tenant:</strong> {selectedPayment.tenantName}
+                      </p>
+                    </Col>
+                    <Col span={12}>
+                      <p>
+                        <strong>House:</strong> {selectedPayment.houseNo}
+                      </p>
+                      <p>
+                        <strong>Receipt:</strong> {selectedPayment.receipt_no}
+                      </p>
+                    </Col>
+                  </Row>
+                </div>
+              }
+              type="error"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+
+            <Divider>Reversal Reason</Divider>
+
+            <Form onFinish={() => handleReversePayment(selectedPayment.id)}>
+              <Form.Item
+                name="reason"
+                label="Reason for Reversal"
+                rules={[{ required: true, message: "Please select a reason" }]}
+              >
+                <Select
+                  placeholder="Select reason for reversal"
+                  onChange={(value) => setReverseReason(value)}
+                  size="large"
+                >
+                  <Option value="wrong_tenant">
+                    Wrong tenant/house number
+                  </Option>
+                  <Option value="wrong_amount">Wrong amount paid</Option>
+                  <Option value="duplicate">Duplicate payment</Option>
+                  <Option value="tenant_request">
+                    Tenant requested refund
+                  </Option>
+                  <Option value="system_error">System error</Option>
+                  <Option value="other">Other</Option>
+                </Select>
+              </Form.Item>
+
+              <Form.Item name="notes" label="Additional Notes">
+                <TextArea
+                  rows={3}
+                  placeholder="Enter additional details about the reversal..."
+                />
+              </Form.Item>
+
+              <Divider />
+
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: 8,
+                }}
+              >
+                <Button onClick={() => setReverseModalVisible(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  danger
+                  type="primary"
+                  htmlType="submit"
+                  loading={reverseLoading}
+                  icon={<RollbackOutlined />}
+                >
+                  Confirm Reversal
+                </Button>
+              </div>
+            </Form>
+          </>
+        )}
       </Modal>
 
       {/* Receipt Modal */}
@@ -1247,10 +2000,7 @@ Paybill: 123456, Account: RENT-001. Code: THG2JK9A1M.`}
                   : "N/A"}
               </Descriptions.Item>
               <Descriptions.Item label="Status">
-                <Badge
-                  color={getStatusColor(selectedPayment.status)}
-                  text={getStatusLabel(selectedPayment.status)}
-                />
+                {getStatusBadge(selectedPayment.status)}
               </Descriptions.Item>
               {selectedPayment.notes && (
                 <Descriptions.Item label="Notes">

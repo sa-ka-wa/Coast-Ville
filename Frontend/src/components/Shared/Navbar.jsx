@@ -1,6 +1,16 @@
 // components/Shared/Navbar.jsx
 import React, { useState, useEffect } from "react";
-import { Layout, Menu, Dropdown, Avatar, Button, Space, Drawer } from "antd";
+import {
+  Layout,
+  Menu,
+  Dropdown,
+  Avatar,
+  Button,
+  Space,
+  Drawer,
+  message,
+  Tooltip,
+} from "antd";
 import {
   DashboardOutlined,
   TeamOutlined,
@@ -12,7 +22,7 @@ import {
   ScheduleOutlined,
   WalletOutlined,
   MenuOutlined,
-  HomeOutlined,
+  SwapOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
@@ -23,9 +33,11 @@ const { Header } = Layout;
 const Navbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout } = useAuth();
+  const { user, logout, switchRole } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [currentRole, setCurrentRole] = useState(user?.role || "caretaker");
+  const [isSwitching, setIsSwitching] = useState(false);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -36,7 +48,52 @@ const Navbar = () => {
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
-  const isAdmin = user?.role === "admin";
+  // Update current role when user changes
+  useEffect(() => {
+    if (user?.role) {
+      setCurrentRole(user.role);
+    }
+  }, [user]);
+
+  const isAdmin = currentRole === "admin";
+  const hasMultipleRoles =
+    user?.secondary_role !== null && user?.secondary_role !== undefined;
+
+  // Handle role switching
+  const handleRoleToggle = async () => {
+    if (isSwitching) return;
+
+    const newRole = isAdmin ? "caretaker" : "admin";
+    setIsSwitching(true);
+
+    try {
+      const result = await switchRole(newRole);
+
+      if (result.success) {
+        setCurrentRole(newRole);
+        message.success(
+          `Switched to ${newRole === "admin" ? "Admin" : "Caretaker"} role`,
+        );
+
+        setTimeout(() => {
+          const targetPath =
+            newRole === "admin" ? "/admin" : "/caretaker/dashboard";
+          if (location.pathname !== targetPath) {
+            navigate(targetPath);
+          }
+        }, 100);
+      } else {
+        message.error(result.error || "Failed to switch role");
+        setCurrentRole(user?.role || "caretaker");
+      }
+    } catch (error) {
+      console.error("Role switch error:", error);
+      message.error("Failed to switch role");
+      setCurrentRole(user?.role || "caretaker");
+    } finally {
+      setIsSwitching(false);
+    }
+  };
 
   const menuItems = isAdmin
     ? [
@@ -99,11 +156,13 @@ const Navbar = () => {
       key: "profile",
       icon: <UserOutlined />,
       label: "Profile",
+      onClick: () => navigate("/profile"),
     },
     {
       key: "settings",
       icon: <SettingOutlined />,
       label: "Settings",
+      onClick: () => navigate("/settings"),
     },
     { type: "divider" },
     {
@@ -195,7 +254,35 @@ const Navbar = () => {
       )}
 
       {/* User Menu */}
-      <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        {/* Clickable Role Badge - Only show if user has multiple roles */}
+        {hasMultipleRoles && !isMobile && (
+          <Tooltip title={`Switch to ${isAdmin ? "Caretaker" : "Admin"}`}>
+            <Button
+              type="text"
+              size="small"
+              onClick={handleRoleToggle}
+              disabled={isSwitching}
+              icon={<SwapOutlined />}
+              style={{
+                borderRadius: 20,
+                padding: "2px 12px",
+                height: 28,
+                background: isAdmin ? "#e6f7ff" : "#f6ffed",
+                color: isAdmin ? "#1890ff" : "#52c41a",
+                border: `1px solid ${isAdmin ? "#91d5ff" : "#b7eb8f"}`,
+                fontWeight: 500,
+                fontSize: 12,
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              {isAdmin ? "Admin" : "Caretaker"}
+            </Button>
+          </Tooltip>
+        )}
+
         <Dropdown
           menu={{
             items: userMenu,
@@ -243,6 +330,39 @@ const Navbar = () => {
         <div style={{ padding: "16px", borderBottom: "1px solid #f0f0f0" }}>
           <PropertySelector />
         </div>
+
+        {/* Mobile Role Switch */}
+        {hasMultipleRoles && (
+          <div
+            style={{
+              padding: "12px 16px",
+              borderBottom: "1px solid #f0f0f0",
+              background: "#fafafa",
+            }}
+          >
+            <Button
+              block
+              onClick={handleRoleToggle}
+              disabled={isSwitching}
+              icon={<SwapOutlined />}
+              style={{
+                borderRadius: 20,
+                height: 36,
+                background: isAdmin ? "#e6f7ff" : "#f6ffed",
+                color: isAdmin ? "#1890ff" : "#52c41a",
+                border: `1px solid ${isAdmin ? "#91d5ff" : "#b7eb8f"}`,
+                fontWeight: 500,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+              }}
+            >
+              Switch to {isAdmin ? "Caretaker" : "Admin"}
+            </Button>
+          </div>
+        )}
+
         <Menu
           mode="vertical"
           selectedKeys={[location.pathname]}
@@ -250,6 +370,7 @@ const Navbar = () => {
           onClick={handleMenuClick}
           style={{ border: "none" }}
         />
+
         <div
           style={{
             padding: "16px",

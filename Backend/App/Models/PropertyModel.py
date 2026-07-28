@@ -19,12 +19,12 @@ class Property(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationships
-    units = db.relationship('Unit', backref='property', lazy=True, cascade='all, delete-orphan')
-    tenants = db.relationship('Tenant', backref='property', lazy=True)
-    payments = db.relationship('Payment', backref='property', lazy=True)
-    water_bills = db.relationship('WaterBill', backref='property', lazy=True)
-    expenses = db.relationship('Expense', backref='property', lazy=True)
+    # Relationships - All defined here
+    units = db.relationship('Unit', back_populates='property', cascade='all, delete-orphan')
+    tenants = db.relationship('Tenant', back_populates='property')
+    payments = db.relationship('Payment', back_populates='property')
+    water_bills = db.relationship('WaterBill', back_populates='property')
+    expenses = db.relationship('Expense', back_populates='property')
 
     def to_dict(self):
         return {

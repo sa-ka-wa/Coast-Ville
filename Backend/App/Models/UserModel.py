@@ -12,6 +12,7 @@ class User(db.Model):
     password = db.Column(db.String(255), nullable=False)
     phone = db.Column(db.String(15))
     role = db.Column(db.String(20), default='caretaker')  # admin, caretaker
+    secondary_role = db.Column(db.String(20), nullable=True)  # admin, caretaker, or null
     active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -23,6 +24,18 @@ class User(db.Model):
             'email': self.email,
             'phone': self.phone,
             'role': self.role,
+            'secondary_role': self.secondary_role,
             'active': self.active,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
+
+    def get_available_roles(self):
+        """Get all roles available to this user"""
+        roles = [self.role]
+        if self.secondary_role:
+            roles.append(self.secondary_role)
+        return roles
+
+    def has_multiple_roles(self):
+        """Check if user has more than one role"""
+        return bool(self.secondary_role)

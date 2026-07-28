@@ -2,7 +2,7 @@
 import api from "./api";
 
 // ============================================================
-// MOCK DATA
+// MOCK DATA (Fallbacks when API fails)
 // ============================================================
 
 let MOCK_PAYMENTS = [
@@ -91,7 +91,10 @@ const createMockPayment = async (paymentData) => {
   const newPayment = {
     id: Date.now(),
     ...paymentData,
-    receipt_no: `RCP-${new Date().toISOString().split("T")[0].replace(/-/g, "")}-${String(MOCK_PAYMENTS.length + 1).padStart(3, "0")}`,
+    receipt_no: `RCP-${new Date()
+      .toISOString()
+      .split("T")[0]
+      .replace(/-/g, "")}-${String(MOCK_PAYMENTS.length + 1).padStart(3, "0")}`,
     payment_date: new Date().toISOString(),
     status: "paid",
     tenantName: "Unknown Tenant",
@@ -189,7 +192,10 @@ const confirmPaymentMock = async (paymentData) => {
   const newPayment = {
     id: Date.now(),
     ...paymentData,
-    receipt_no: `RCP-${new Date().toISOString().split("T")[0].replace(/-/g, "")}-${String(MOCK_PAYMENTS.length + 1).padStart(3, "0")}`,
+    receipt_no: `RCP-${new Date()
+      .toISOString()
+      .split("T")[0]
+      .replace(/-/g, "")}-${String(MOCK_PAYMENTS.length + 1).padStart(3, "0")}`,
     payment_date: new Date().toISOString(),
     status: "paid",
     tenantName: "Unknown Tenant",
@@ -289,11 +295,12 @@ const getPaymentSummaryMock = async () => {
 };
 
 // ============================================================
-// API FUNCTIONS
+// REAL API FUNCTIONS (with mock fallbacks)
 // ============================================================
 
 /**
  * Get all payments with filters
+ * GET /payments?property_id=X&tenant_id=X&status=X
  */
 export const getPayments = async (filters = {}) => {
   try {
@@ -307,6 +314,7 @@ export const getPayments = async (filters = {}) => {
 
 /**
  * Get a single payment by ID
+ * GET /payments/:id
  */
 export const getPayment = async (paymentId) => {
   try {
@@ -321,6 +329,7 @@ export const getPayment = async (paymentId) => {
 
 /**
  * Create a new payment (manual entry)
+ * POST /payments
  */
 export const createPayment = async (paymentData) => {
   try {
@@ -334,6 +343,7 @@ export const createPayment = async (paymentData) => {
 
 /**
  * Parse M-Pesa message from SMS
+ * POST /payments/parse-mpesa
  */
 export const parseMpesaMessage = async (data) => {
   try {
@@ -350,6 +360,7 @@ export const parseMpesaMessage = async (data) => {
 
 /**
  * Match payment to tenant
+ * POST /payments/match
  */
 export const matchPayment = async (data) => {
   try {
@@ -368,6 +379,7 @@ export const matchTenantToPayment = matchPayment;
 
 /**
  * Confirm a payment (for M-Pesa or manual)
+ * POST /payments/confirm
  */
 export const confirmPayment = async (paymentData) => {
   try {
@@ -384,6 +396,7 @@ export const confirmPayment = async (paymentData) => {
 
 /**
  * Get payment statistics
+ * GET /payments/stats?property_id=X
  */
 export const getPaymentStats = async (filters = {}) => {
   try {
@@ -400,6 +413,7 @@ export const getPaymentStats = async (filters = {}) => {
 
 /**
  * Initiate STK Push
+ * POST /payments/stk-push
  */
 export const initiateSTKPush = async (data) => {
   try {
@@ -416,6 +430,7 @@ export const initiateSTKPush = async (data) => {
 
 /**
  * Get payment history
+ * GET /payments/history?tenant_id=X&property_id=X
  */
 export const getPaymentHistory = async (filters = {}) => {
   try {
@@ -432,6 +447,7 @@ export const getPaymentHistory = async (filters = {}) => {
 
 /**
  * Generate receipt for a payment
+ * GET /payments/:paymentId/receipt
  */
 export const generateReceipt = async (paymentId) => {
   try {
@@ -448,6 +464,7 @@ export const generateReceipt = async (paymentId) => {
 
 /**
  * Send receipt to tenant
+ * POST /payments/send-receipt
  */
 export const sendReceipt = async (data) => {
   try {
@@ -461,6 +478,7 @@ export const sendReceipt = async (data) => {
 
 /**
  * Check payment status
+ * POST /payments/status
  */
 export const checkPaymentStatus = async (data) => {
   try {
@@ -477,6 +495,7 @@ export const checkPaymentStatus = async (data) => {
 
 /**
  * Get payment summary
+ * GET /payments/summary?property_id=X
  */
 export const getPaymentSummary = async (filters = {}) => {
   try {
@@ -493,6 +512,7 @@ export const getPaymentSummary = async (filters = {}) => {
 
 /**
  * Delete a payment (admin only)
+ * DELETE /payments/:paymentId
  */
 export const deletePayment = async (paymentId) => {
   try {
@@ -527,3 +547,300 @@ const paymentsService = {
 };
 
 export default paymentsService;
+
+// services/payments.js - Add these functions to the existing file
+
+// ============================================================
+// PAYMENT ALLOCATION FUNCTIONS
+// ============================================================
+
+/**
+ * Process payment allocation (rent, water, deposit)
+ * POST /payments/:id/allocate
+ */
+export const processPaymentAllocation = async (paymentId) => {
+  try {
+    const response = await api.post(`/payments/${paymentId}/allocate`);
+    return response;
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for processPaymentAllocation, using mock:",
+      error.message,
+    );
+    // Mock allocation
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Find the payment in mock data
+    const payment = MOCK_PAYMENTS.find((p) => p.id === paymentId);
+    if (!payment) {
+      return {
+        data: {
+          success: false,
+          message: "Payment not found",
+        },
+      };
+    }
+
+    // Mock allocation logic
+    const monthlyRent = 15000;
+    const waterBill = 1500;
+    const deposit = 30000;
+
+    let allocations = [];
+    let remaining = payment.amount;
+    let depositAllocated = 0;
+    let waterAllocated = 0;
+    let rentAllocated = 0;
+    let excess = 0;
+    let balanceDue = 0;
+
+    // Check if deposit is already paid (mock)
+    const depositPaid = false;
+
+    // 1. Allocate to deposit if not paid
+    if (!depositPaid && remaining > 0) {
+      const depositAmount = Math.min(remaining, deposit);
+      if (depositAmount > 0) {
+        depositAllocated = depositAmount;
+        remaining -= depositAmount;
+        allocations.push({
+          type: "deposit",
+          amount: depositAmount,
+          description: `🏦 Deposit paid: KSh ${depositAmount.toLocaleString()}`,
+          status: depositAmount === deposit ? "complete" : "partial",
+        });
+      }
+    }
+
+    // 2. Allocate to water bill
+    if (remaining > 0) {
+      const waterAmount = Math.min(remaining, waterBill);
+      if (waterAmount > 0) {
+        waterAllocated = waterAmount;
+        remaining -= waterAmount;
+        allocations.push({
+          type: "water",
+          amount: waterAmount,
+          description: `💧 Water bill paid: KSh ${waterAmount.toLocaleString()}`,
+          status: waterAmount === waterBill ? "complete" : "partial",
+        });
+      }
+    }
+
+    // 3. Allocate to rent
+    if (remaining > 0) {
+      if (remaining >= monthlyRent) {
+        rentAllocated = monthlyRent;
+        remaining -= monthlyRent;
+        allocations.push({
+          type: "rent",
+          amount: monthlyRent,
+          description: `🏠 Rent paid: KSh ${monthlyRent.toLocaleString()}`,
+          status: "complete",
+        });
+
+        // Check for excess
+        if (remaining > 0) {
+          excess = remaining;
+          allocations.push({
+            type: "excess",
+            amount: remaining,
+            description: `💰 Excess credited to next month: KSh ${remaining.toLocaleString()}`,
+            status: "credit",
+          });
+        }
+      } else {
+        // Partial rent
+        rentAllocated = remaining;
+        balanceDue = monthlyRent - remaining;
+        allocations.push({
+          type: "rent_partial",
+          amount: remaining,
+          description: `⚠️ Partial rent: KSh ${remaining.toLocaleString()} (Balance due: KSh ${balanceDue.toLocaleString()})`,
+          status: "partial",
+        });
+        remaining = 0;
+      }
+    }
+
+    // Update mock payment
+    const updatedPayment = {
+      ...payment,
+      rent_amount: rentAllocated,
+      water_amount: waterAllocated,
+      deposit_amount: depositAllocated,
+      excess_amount: excess,
+      balance_due: balanceDue,
+      status: balanceDue > 0 ? "partial" : "paid",
+    };
+
+    // Update in mock array
+    const index = MOCK_PAYMENTS.findIndex((p) => p.id === paymentId);
+    if (index !== -1) {
+      MOCK_PAYMENTS[index] = updatedPayment;
+    }
+
+    return {
+      data: {
+        success: true,
+        message: "Payment allocated successfully",
+        payment: updatedPayment,
+        allocations: allocations,
+        excess: excess,
+        balance_due: balanceDue,
+        total_allocated: payment.amount - remaining,
+      },
+    };
+  }
+};
+
+/**
+ * Get payment allocation details
+ * GET /payments/:id/allocation
+ */
+export const getPaymentAllocation = async (paymentId) => {
+  try {
+    const response = await api.get(`/payments/${paymentId}/allocation`);
+    return response;
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for getPaymentAllocation, using mock:",
+      error.message,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const payment = MOCK_PAYMENTS.find((p) => p.id === paymentId);
+    if (!payment) {
+      return {
+        data: {
+          payment: null,
+          allocations: {
+            rent: 0,
+            water: 0,
+            deposit: 0,
+            excess: 0,
+            balance_due: 0,
+            credited_to_next_month: false,
+          },
+        },
+      };
+    }
+
+    return {
+      data: {
+        payment: payment,
+        allocations: {
+          rent: payment.rent_amount || 0,
+          water: payment.water_amount || 0,
+          deposit: payment.deposit_amount || 0,
+          excess: payment.excess_amount || 0,
+          balance_due: payment.balance_due || 0,
+          credited_to_next_month: payment.credited_to_next_month || false,
+        },
+      },
+    };
+  }
+};
+
+/**
+ * Move payment to different tenant (fix wrong house)
+ * POST /payments/:id/move
+ */
+export const movePaymentToTenant = async (paymentId, newTenantId, reason) => {
+  try {
+    const response = await api.post(`/payments/${paymentId}/move`, {
+      new_tenant_id: newTenantId,
+      reason: reason,
+    });
+    return response;
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for movePaymentToTenant, using mock:",
+      error.message,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const payment = MOCK_PAYMENTS.find((p) => p.id === paymentId);
+    if (!payment) {
+      return {
+        data: {
+          success: false,
+          message: "Payment not found",
+        },
+      };
+    }
+
+    // Update mock payment
+    const updatedPayment = {
+      ...payment,
+      original_tenant_id: payment.tenant_id,
+      tenant_id: newTenantId,
+      moved_reason: reason,
+      moved_at: new Date().toISOString(),
+    };
+
+    const index = MOCK_PAYMENTS.findIndex((p) => p.id === paymentId);
+    if (index !== -1) {
+      MOCK_PAYMENTS[index] = updatedPayment;
+    }
+
+    return {
+      data: {
+        success: true,
+        message: "Payment moved successfully",
+        payment: updatedPayment,
+      },
+    };
+  }
+};
+
+/**
+ * Reverse a payment (refund)
+ * POST /payments/:id/reverse
+ */
+export const reversePayment = async (paymentId, reason) => {
+  try {
+    const response = await api.post(`/payments/${paymentId}/reverse`, {
+      reason: reason,
+    });
+    return response;
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for reversePayment, using mock:",
+      error.message,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const payment = MOCK_PAYMENTS.find((p) => p.id === paymentId);
+    if (!payment) {
+      return {
+        data: {
+          success: false,
+          message: "Payment not found",
+        },
+      };
+    }
+
+    const reversedPayment = {
+      ...payment,
+      status: "reversed",
+      reversed: true,
+      reversal_reason: reason,
+      reversed_at: new Date().toISOString(),
+    };
+
+    const index = MOCK_PAYMENTS.findIndex((p) => p.id === paymentId);
+    if (index !== -1) {
+      MOCK_PAYMENTS[index] = reversedPayment;
+    }
+
+    return {
+      data: {
+        success: true,
+        message: "Payment reversed successfully",
+        payment: reversedPayment,
+        reversal_id: `REV-${Date.now()}`,
+      },
+    };
+  }
+};

@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
 from App.Controllers.PaymentController import PaymentController
 from App.Controllers.TenantController import TenantController
@@ -6,6 +6,10 @@ from App.Controllers.PropertyController import PropertyController
 from App.Controllers.UnitController import UnitController
 from App.Controllers.WaterController import WaterController
 from datetime import datetime
+
+# ✅ ADD THESE IMPORTS FOR MONTHLY STATEMENTS
+from App.Models.TenantModel import Tenant
+from App.Models.PaymentModel import Payment
 
 api_bp = Blueprint('api', __name__)
 
@@ -92,7 +96,7 @@ def get_tenant_stats():
     return TenantController.get_tenant_stats()
 
 # ============================================================
-# TENANT NESTED WATER ROUTES (RESTful - for tenant details page)
+# TENANT NESTED WATER ROUTES
 # ============================================================
 @api_bp.route('/tenants/<int:tenant_id>/water/readings', methods=['GET'])
 @jwt_required()
@@ -113,7 +117,7 @@ def get_tenant_water_bills(tenant_id):
     return WaterController.get_bills_for_tenant(tenant_id)
 
 # ============================================================
-# WATER ROUTES (Filterable - for admin/overview views)
+# WATER ROUTES
 # ============================================================
 @api_bp.route('/water/readings', methods=['GET'])
 @jwt_required()
@@ -180,6 +184,11 @@ def confirm_payment():
 def match_payment():
     return PaymentController.match_payment()
 
+# ✅ PRIMARY: C2B Callback (No auth - called by Safaricom)
+@api_bp.route('/mpesa/c2b-callback', methods=['POST'])
+def mpesa_c2b_callback():
+    return PaymentController.c2b_callback()
+
 @api_bp.route('/payments/stats', methods=['GET'])
 @jwt_required()
 def get_payment_stats():
@@ -226,6 +235,34 @@ def get_payment_summary():
 @api_bp.route('/mpesa/callback', methods=['POST'])
 def mpesa_callback():
     return PaymentController.mpesa_callback()
+
+# ============================================================
+# PAYMENT ALLOCATION ROUTES (ONLY ONCE!)
+# ============================================================
+
+@api_bp.route('/payments/<int:payment_id>/allocate', methods=['POST'])
+@jwt_required()
+def allocate_payment(payment_id):
+    """Allocate payment to deposit, water, and rent"""
+    return PaymentController.allocate_payment()
+
+@api_bp.route('/payments/<int:payment_id>/allocation', methods=['GET'])
+@jwt_required()
+def get_payment_allocation(payment_id):
+    """Get payment allocation details"""
+    return PaymentController.get_payment_allocation(payment_id)
+
+@api_bp.route('/payments/<int:payment_id>/move', methods=['POST'])
+@jwt_required()
+def move_payment(payment_id):
+    """Move payment to different tenant (fix wrong house)"""
+    return PaymentController.move_payment_to_tenant(payment_id)
+
+@api_bp.route('/payments/<int:payment_id>/reverse', methods=['POST'])
+@jwt_required()
+def reverse_payment(payment_id):
+    """Reverse/refund a payment"""
+    return PaymentController.reverse_payment(payment_id)
 
 # ============================================================
 # EXPENSE ROUTES
@@ -298,7 +335,7 @@ def list_routes():
     return jsonify(routes), 200
 
 # ============================================================
-# SCHEDULER ROUTES (UNIQUE - NO DUPLICATES)
+# SCHEDULER ROUTES
 # ============================================================
 
 @api_bp.route('/scheduler/run-monthly', methods=['POST'])
@@ -372,6 +409,7 @@ def scheduler_status():
         'day': today.day,
         'day_name': today.strftime('%A')
     }), 200
+
 @api_bp.route('/scheduler/send-statements', methods=['POST'])
 @jwt_required()
 def scheduler_send_statements():
@@ -386,3 +424,131 @@ def scheduler_send_statements():
         }), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# App/Routes/api.py - Add these routes
+
+# ============================================================
+# SMS ROUTES
+# ============================================================
+
+@api_bp.route('/sms/test', methods=['POST'])
+@jwt_required()
+def sms_test():
+    """Send test SMS"""
+    from App.Controllers.SMSController import SMSController
+    return SMSController.send_test_sms()
+
+@api_bp.route('/sms/rent-reminder', methods=['POST'])
+@jwt_required()
+def sms_rent_reminder():
+    """Send rent reminder to tenant"""
+    from App.Controllers.SMSController import SMSController
+    return SMSController.send_rent_reminder()
+
+@api_bp.route('/sms/bulk-reminders', methods=['POST'])
+@jwt_required()
+def sms_bulk_reminders():
+    """Send rent reminders to all tenants"""
+    from App.Controllers.SMSController import SMSController
+    return SMSController.send_bulk_rent_reminders()
+
+@api_bp.route('/sms/receipt', methods=['POST'])
+@jwt_required()
+def sms_receipt():
+    """Send payment receipt to tenant"""
+    from App.Controllers.SMSController import SMSController
+    return SMSController.send_receipt()
+
+@api_bp.route('/sms/water-bill', methods=['POST'])
+@jwt_required()
+def sms_water_bill():
+    """Send water bill notification to tenant"""
+    from App.Controllers.SMSController import SMSController
+    return SMSController.send_water_bill()
+
+@api_bp.route('/sms/statement', methods=['POST'])
+@jwt_required()
+def sms_statement():
+    """Send monthly statement to tenant"""
+    from App.Controllers.SMSController import SMSController
+    return SMSController.send_statement()
+
+@api_bp.route('/sms/admin-notify', methods=['POST'])
+@jwt_required()
+def sms_admin_notify():
+    """Send admin notification"""
+    from App.Controllers.SMSController import SMSController
+    return SMSController.send_admin_notification()
+
+@api_bp.route('/sms/history', methods=['GET'])
+@jwt_required()
+def sms_history():
+    """Get SMS history"""
+    from App.Controllers.SMSController import SMSController
+    return SMSController.get_sms_history()
+
+
+# App/Routes/api.py - Add these routes near the other tenant routes
+
+# ============================================================
+# MONTHLY STATEMENT ROUTES
+# ============================================================
+
+@api_bp.route('/tenants/<int:tenant_id>/monthly-statement', methods=['GET'])
+@jwt_required()
+def get_tenant_monthly_statement(tenant_id):
+    """Get monthly statement for a specific tenant"""
+    year = request.args.get('year', type=int)
+    month = request.args.get('month', type=int)
+
+    from datetime import datetime
+    if not year or not month:
+        now = datetime.now()
+        year = now.year
+        month = now.month
+
+    tenant = Tenant.query.get(tenant_id)
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    statement = tenant.get_monthly_statement(year, month)
+    return jsonify(statement), 200
+
+
+@api_bp.route('/tenants/monthly-statements', methods=['GET'])
+@jwt_required()
+def get_all_monthly_statements():
+    """Get monthly statements for all tenants"""
+    property_id = request.args.get('property_id', type=int)
+    year = request.args.get('year', type=int)
+    month = request.args.get('month', type=int)
+
+    from datetime import datetime
+    if not year or not month:
+        now = datetime.now()
+        year = now.year
+        month = now.month
+
+    result = Tenant.get_all_tenant_statements(property_id, year, month)
+    return jsonify(result), 200
+
+
+@api_bp.route('/payments/monthly-summary', methods=['GET'])
+@jwt_required()
+def get_monthly_payment_summary():
+    """Get monthly payment summary for a tenant"""
+    tenant_id = request.args.get('tenant_id', type=int)
+    year = request.args.get('year', type=int)
+    month = request.args.get('month', type=int)
+
+    if not tenant_id:
+        return jsonify({'error': 'tenant_id required'}), 400
+
+    from datetime import datetime
+    if not year or not month:
+        now = datetime.now()
+        year = now.year
+        month = now.month
+
+    summary = Payment.get_monthly_summary(tenant_id, year, month)
+    return jsonify(summary), 200

@@ -206,3 +206,21 @@ class SMSService:
         lines.append("📞 Support: 0712345678")
 
         return "\n".join(lines)
+
+    # Add to SMSService class
+    @classmethod
+    def send_test_sms(cls, phone):
+        """Send a test SMS to verify configuration"""
+        message = """
+    🧪 TEST MESSAGE - RentManager
+
+    This is a test from RentManager.
+
+    If you received this, your SMS configuration is working correctly!
+
+    ✅ Africa's Talking Connected
+    ✅ SMS Service Active
+
+    RentManager System
+        """
+        return cls.send_sms(phone, message.strip())
