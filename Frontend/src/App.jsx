@@ -8,7 +8,7 @@ import { useAuth } from "./hooks/useAuth";
 import { useProperty } from "./context/PropertyContext";
 import ProtectedRoute from "./components/Shared/ProtectedRoute";
 import Navbar from "./components/Shared/Navbar";
-import AppInstallBanner from "./components/Shared/AppInstallBanner"; // ← ADD THIS
+import AppInstallBanner from "./components/Shared/AppInstallBanner";
 
 // Pages
 import Login from "./pages/Login";
@@ -26,6 +26,7 @@ import AdminPayments from "./pages/Admin/Payments";
 import WaterBills from "./pages/Admin/WaterBills";
 import Reports from "./pages/Admin/Reports";
 import MobileDashboard from "./pages/Caretaker/MobileDashboard";
+import PropertySettings from "./pages/Admin/PropertySettings"; // ← ADD THIS
 
 const { Content } = Layout;
 
@@ -64,7 +65,6 @@ const AppContent = () => {
   return (
     <Layout style={{ minHeight: "100vh" }}>
       {showNavigation && <Navbar />}
-      {/* Add the install banner */}
       <AppInstallBanner />
       <Layout>
         <Layout
@@ -85,18 +85,24 @@ const AppContent = () => {
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
 
+                {/* Admin Routes */}
                 <Route element={<ProtectedRoute allowedRoles={["admin"]} />}>
                   <Route path="/admin" element={<AdminDashboard />} />
                   <Route path="/admin/tenants" element={<Tenants />} />
                   <Route path="/admin/payments" element={<AdminPayments />} />
                   <Route path="/admin/water" element={<WaterBills />} />
                   <Route path="/admin/reports" element={<Reports />} />
+                  <Route
+                    path="/admin/property-settings"
+                    element={<PropertySettings />}
+                  />{" "}
+                  {/* ← ADD THIS ROUTE */}
                 </Route>
 
+                {/* Caretaker Routes */}
                 <Route
                   element={<ProtectedRoute allowedRoles={["caretaker"]} />}
                 >
-                  {/* Mobile Dashboard as default caretaker page */}
                   <Route path="/caretaker" element={<MobileDashboard />} />
                   <Route
                     path="/caretaker/dashboard"
@@ -127,6 +133,7 @@ const AppContent = () => {
                   />
                 </Route>
 
+                {/* Root Route */}
                 <Route
                   path="/"
                   element={

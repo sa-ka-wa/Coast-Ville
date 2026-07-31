@@ -1,4 +1,4 @@
-// pages/Caretaker/MeterReadings.jsx - Connected to Real API
+// pages/Caretaker/MeterReadings.jsx - Updated with WaterReadingHistory
 import React, { useState, useEffect } from "react";
 import {
   Card,
@@ -24,6 +24,7 @@ import {
   Divider,
   Alert,
   Avatar,
+  Tabs,
 } from "antd";
 import {
   PlusOutlined,
@@ -46,6 +47,7 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   ExclamationCircleOutlined,
+  HistoryOutlined,
 } from "@ant-design/icons";
 import {
   submitWaterReading,
@@ -59,6 +61,7 @@ import { getTenants } from "../../services/tenants";
 import { formatCurrency, formatDate } from "../../utils/formatters";
 import { useProperty } from "../../context/PropertyContext";
 import dayjs from "dayjs";
+import WaterReadingHistory from "./WaterReadingHistory";
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -71,8 +74,10 @@ const MeterReadings = () => {
   const [tenants, setTenants] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [detailVisible, setDetailVisible] = useState(false);
+  const [historyModalVisible, setHistoryModalVisible] = useState(false);
   const [editingReading, setEditingReading] = useState(null);
   const [selectedReading, setSelectedReading] = useState(null);
+  const [selectedTenantId, setSelectedTenantId] = useState(null);
   const [searchText, setSearchText] = useState("");
   const [tenantFilter, setTenantFilter] = useState("all");
   const [form] = Form.useForm();
@@ -190,7 +195,6 @@ const MeterReadings = () => {
   const handleDelete = async (id) => {
     try {
       // Since we don't have a delete endpoint yet, use mock
-      // In production: await deleteWaterReading(id);
       const updatedReadings = readings.filter((r) => r.id !== id);
       setReadings(updatedReadings);
       setFilteredReadings(updatedReadings);
@@ -346,7 +350,7 @@ const MeterReadings = () => {
     {
       title: "Actions",
       key: "actions",
-      width: 160,
+      width: 200,
       render: (_, record) => (
         <Space>
           <Tooltip title="View Details">
@@ -356,6 +360,16 @@ const MeterReadings = () => {
               onClick={() => {
                 setSelectedReading(record);
                 setDetailVisible(true);
+              }}
+            />
+          </Tooltip>
+          <Tooltip title="View History">
+            <Button
+              icon={<HistoryOutlined />}
+              size="small"
+              onClick={() => {
+                setSelectedTenantId(record.tenantId);
+                setHistoryModalVisible(true);
               }}
             />
           </Tooltip>
@@ -408,7 +422,7 @@ const MeterReadings = () => {
 
   return (
     <div>
-      {/* Property Header - Like ManageTenants */}
+      {/* Property Header */}
       <Card
         style={{
           marginBottom: 24,
@@ -430,6 +444,7 @@ const MeterReadings = () => {
           </div>
         </div>
       </Card>
+
       {/* Stats Cards */}
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col xs={24} sm={12} lg={6}>
@@ -892,7 +907,7 @@ const MeterReadings = () => {
                   setModalVisible(true);
                 }}
               >
-                Edit Reading
+                Edit Reading 0{" "}
               </Button>
               {selectedReading.status !== "billed" && (
                 <Button
@@ -909,6 +924,17 @@ const MeterReadings = () => {
           </div>
         )}
       </Modal>
+
+      {/* Water Reading History Modal - Integrated */}
+      <WaterReadingHistory
+        tenantId={selectedTenantId}
+        visible={historyModalVisible}
+        onClose={() => {
+          setHistoryModalVisible(false);
+          setSelectedTenantId(null);
+        }}
+        propertyId={currentPropertyId}
+      />
     </div>
   );
 };

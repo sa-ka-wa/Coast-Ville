@@ -1166,7 +1166,6 @@ const Payments = () => {
               </Form.Item>
             </Form>
           </TabPane>
-
           <TabPane
             tab={
               <span>
@@ -1407,6 +1406,196 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
                 ]}
               />
             )}
+          </TabPane>
+          // pages/Caretaker/Payments.jsx - Add this new TabPane inside the Tabs
+          component
+          <TabPane
+            tab={
+              <span>
+                <BankOutlined />
+                💳 Paybill
+              </span>
+            }
+            key="paybill"
+          >
+            <Alert
+              message="💳 Paybill Payment"
+              description="Enter the account reference and amount to process a Paybill payment. Format: ACCOUNT_PREFIX#HOUSE_NO (e.g., 40766915#101)"
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+
+            <Card style={{ background: "#fafafa" }}>
+              <Form
+                onFinish={async (values) => {
+                  try {
+                    setLoading(true);
+                    const response = await api.post("/payments/paybill", {
+                      account_reference: values.account_reference,
+                      amount: values.amount,
+                      phone_number: values.phone_number || "254708374149",
+                      mpesa_code:
+                        values.mpesa_code ||
+                        "PAYBILL" + Date.now().toString().slice(-6),
+                    });
+
+                    if (response.data.success) {
+                      message.success(
+                        "✅ Paybill payment processed successfully!",
+                      );
+                      setModalVisible(false);
+                      fetchData();
+                    } else {
+                      message.error(response.data.error || "Payment failed");
+                    }
+                  } catch (error) {
+                    console.error("Paybill payment error:", error);
+                    message.error("Failed to process paybill payment");
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                layout="vertical"
+              >
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <Form.Item
+                      name="account_reference"
+                      label="Account Reference"
+                      rules={[
+                        {
+                          required: true,
+                          message: "Please enter account reference",
+                        },
+                        {
+                          pattern: /^[A-Za-z0-9]+#[A-Za-z0-9]+$/,
+                          message:
+                            "Format: ACCOUNT_PREFIX#HOUSE_NO (e.g., 40766915#101)",
+                        },
+                      ]}
+                      tooltip="Format: ACCOUNT_PREFIX#HOUSE_NO (e.g., 40766915#101)"
+                    >
+                      <Input
+                        placeholder="e.g., 40766915#101"
+                        size="large"
+                        prefix={<HomeOutlined />}
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item
+                      name="amount"
+                      label="Amount (KSh)"
+                      rules={[
+                        { required: true, message: "Please enter amount" },
+                        {
+                          type: "number",
+                          min: 1,
+                          message: "Amount must be greater than 0",
+                        },
+                      ]}
+                    >
+                      <Input
+                        type="number"
+                        placeholder="e.g., 15000"
+                        size="large"
+                        prefix={<DollarOutlined />}
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
+
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <Form.Item
+                      name="phone_number"
+                      label="Phone Number (Optional)"
+                      tooltip="Phone number of the person making payment"
+                    >
+                      <Input
+                        placeholder="e.g., 254708374149"
+                        size="large"
+                        prefix={<MobileOutlined />}
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item
+                      name="mpesa_code"
+                      label="M-Pesa Code (Optional)"
+                      tooltip="M-Pesa transaction code"
+                    >
+                      <Input
+                        placeholder="e.g., TEST123456"
+                        size="large"
+                        prefix={<CheckOutlined />}
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
+
+                <Form.Item>
+                  <Space>
+                    <Button
+                      type="primary"
+                      htmlType="submit"
+                      size="large"
+                      loading={loading}
+                      icon={<BankOutlined />}
+                    >
+                      Process Paybill Payment
+                    </Button>
+                    <Button
+                      size="large"
+                      onClick={() => {
+                        // Auto-fill with example data for testing
+                        form.setFieldsValue({
+                          account_reference: "40766915#101",
+                          amount: 15000,
+                          phone_number: "254708374149",
+                          mpesa_code: "TEST" + Date.now().toString().slice(-6),
+                        });
+                      }}
+                    >
+                      Fill Test Data
+                    </Button>
+                  </Space>
+                </Form.Item>
+
+                <Divider />
+
+                <Alert
+                  message="📋 Paybill Format Guide"
+                  description={
+                    <div>
+                      <p>
+                        <strong>Format:</strong>{" "}
+                        <code>ACCOUNT_PREFIX#HOUSE_NO</code>
+                      </p>
+                      <p>
+                        <strong>Example:</strong> <code>40766915#101</code>
+                      </p>
+                      <ul style={{ marginTop: 8 }}>
+                        <li>
+                          <strong>40766915</strong> = Account prefix (last 8
+                          digits of owner's phone)
+                        </li>
+                        <li>
+                          <strong>101</strong> = House number
+                        </li>
+                      </ul>
+                      <p style={{ marginTop: 8, color: "#52c41a" }}>
+                        ✅ Payment will be automatically allocated to the
+                        tenant's account
+                      </p>
+                    </div>
+                  }
+                  type="info"
+                  showIcon
+                />
+              </Form>
+            </Card>
           </TabPane>
         </Tabs>
       </Modal>

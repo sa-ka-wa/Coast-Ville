@@ -162,7 +162,7 @@ const Navbar = () => {
       key: "settings",
       icon: <SettingOutlined />,
       label: "Settings",
-      onClick: () => navigate("/settings"),
+      onClick: () => navigate("/admin/property-settings"),
     },
     { type: "divider" },
     {
