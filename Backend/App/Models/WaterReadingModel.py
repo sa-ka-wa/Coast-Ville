@@ -3,11 +3,14 @@ from App.Extension import db
 from datetime import datetime
 
 
+# App/Models/WaterReadingModel.py - Update the WaterReading class
+
 class WaterReading(db.Model):
     __tablename__ = 'water_readings'
 
     id = db.Column(db.Integer, primary_key=True)
     tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'))
+    unit_id = db.Column(db.Integer, db.ForeignKey('units.id'))  # ✅ Add this field
     previous_reading = db.Column(db.Float)
     current_reading = db.Column(db.Float)
     units_used = db.Column(db.Float)
@@ -20,13 +23,58 @@ class WaterReading(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     tenant = db.relationship('Tenant', back_populates='water_readings')
+    unit = db.relationship('Unit', back_populates='water_readings')  # ✅ Add relationship
+
+    @classmethod
+    def get_latest_reading_for_unit(cls, unit_id):
+        """Get the most recent water reading for a unit"""
+        try:
+            reading = cls.query.filter_by(unit_id=unit_id) \
+                .order_by(cls.reading_date.desc()) \
+                .first()
+            return reading
+        except Exception as e:
+            print(f"Error getting latest reading for unit: {e}")
+            return None
+
+    @classmethod
+    def get_previous_reading_for_tenant(cls, tenant_id):
+        """Get the previous reading for a tenant"""
+        try:
+            # First get the tenant to get their unit
+            from App.Models.TenantModel import Tenant
+            tenant = Tenant.query.get(tenant_id)
+            if not tenant:
+                return 0
+
+            # Get the latest reading for this unit
+            latest = cls.get_latest_reading_for_unit(tenant.unit_id)
+            if latest:
+                return latest.current_reading
+            return 0
+        except Exception as e:
+            print(f"Error getting previous reading for tenant: {e}")
+            return 0
+
+    @classmethod
+    def get_previous_reading_for_unit(cls, unit_id):
+        """Get the previous reading for a unit (for new tenants)"""
+        try:
+            latest = cls.get_latest_reading_for_unit(unit_id)
+            if latest:
+                return latest.current_reading
+            return 0
+        except Exception as e:
+            print(f"Error getting previous reading for unit: {e}")
+            return 0
 
     def to_dict(self):
         return {
             'id': self.id,
             'tenant_id': self.tenant_id,
+            'unit_id': self.unit_id,
             'tenant_name': self.tenant.name if self.tenant else None,
-            'house_no': self.tenant.unit.unit_number if self.tenant and self.tenant.unit else None,
+            'house_no': self.unit.unit_number if self.unit else None,
             'previous_reading': self.previous_reading,
             'current_reading': self.current_reading,
             'units_used': self.units_used,
@@ -39,6 +87,8 @@ class WaterReading(db.Model):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
 
+
+# App/Models/WaterReadingModel.py - Update the WaterBill class
 
 class WaterBill(db.Model):
     __tablename__ = 'water_bills'
@@ -61,17 +111,16 @@ class WaterBill(db.Model):
     paid_at = db.Column(db.DateTime)
     payment_id = db.Column(db.Integer, db.ForeignKey('payments.id'))
 
-    # ✅ Relationships - NO back_populates
+    # ✅ Relationships
     property = db.relationship('Property', back_populates='water_bills')
     tenant = db.relationship('Tenant', back_populates='water_bills')
     unit = db.relationship('Unit', back_populates='water_bills')
 
-    # ✅ Payment relationship - WITHOUT back_populates
+    # ✅ Payment relationship
     payment = db.relationship(
         'Payment',
         foreign_keys=[payment_id],
         uselist=False
-        # ✅ REMOVED: back_populates='water_bill'
     )
 
     def to_dict(self):
@@ -81,7 +130,7 @@ class WaterBill(db.Model):
             'tenant_id': self.tenant_id,
             'unit_id': self.unit_id,
             'tenantName': self.tenant.name if self.tenant else None,
-            'houseNo': self.tenant.unit.unit_number if self.tenant and self.tenant.unit else None,
+            'houseNo': self.unit.unit_number if self.unit else None,
             'month': self.month.isoformat() if self.month else None,
             'waterCharge': self.water_charge,
             'garbageCharge': self.garbage_charge,

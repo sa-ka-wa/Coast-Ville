@@ -425,6 +425,31 @@ const updateWaterBillStatusMock = async (id, status) => {
   await new Promise((resolve) => setTimeout(resolve, 300));
   return { data: { id, status, message: "Status updated (mock)" } };
 };
+// services/water.js - Add this function near the other API calls
+
+// Get previous reading for a tenant (auto-populates from last reading)
+export const getPreviousReading = async (tenantId) => {
+  try {
+    const response = await api.get(
+      `/water/previous-reading?tenant_id=${tenantId}`,
+    );
+    return response;
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for getPreviousReading, using mock:",
+      error.message,
+    );
+    // Mock fallback - return 0 for first reading
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return {
+      data: {
+        previous_reading: 0,
+        has_previous: false,
+        message: "No previous reading found",
+      },
+    };
+  }
+};
 
 // ============================================================
 // EXPORT
@@ -444,6 +469,7 @@ const waterService = {
   getWaterBillingSummary,
   getPendingWaterBills,
   downloadWaterReport,
+  getPreviousReading,
 };
 
 export default waterService;

@@ -37,11 +37,11 @@ def create_app():
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-    # ✅ Connection pooling configuration
+    # ✅ Connection pooling configuration (kept from working version)
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
         'pool_size': 10,
-        'pool_recycle': 3600,  # Recycle connections after 1 hour
-        'pool_pre_ping': True,  # Check connection before using
+        'pool_recycle': 3600,
+        'pool_pre_ping': True,
         'pool_timeout': 30,
         'max_overflow': 20,
         'connect_args': {
@@ -55,19 +55,12 @@ def create_app():
     migrate.init_app(app, db)
     jwt = JWTManager(app)
 
-    # ✅ CORS - Allow your frontend
+    # ✅ SIMPLE CORS - Like your working version but with more options
     CORS(app,
-         origins=[
-             'https://src-seven-rosy-67.vercel.app',
-             'https://coast-ville-1.onrender.com',
-             'http://localhost:3000',
-             'http://localhost:5173',
-             'https://*.vercel.app',
-             'https://*.onrender.com'
-         ],
-         supports_credentials=True,
-         allow_headers=['Content-Type', 'Authorization'],
-         methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
+         origins='*',  # Allow all origins (like your working version)
+         allow_headers=['Content-Type', 'Authorization', 'Accept'],
+         methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+         supports_credentials=True
          )
 
     # Register blueprints

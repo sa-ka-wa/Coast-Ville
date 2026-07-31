@@ -1,4 +1,4 @@
-// pages/Caretaker/MeterReadings.jsx - Updated with WaterReadingHistory
+// pages/Caretaker/MeterReadings.jsx
 import React, { useState, useEffect } from "react";
 import {
   Card,
@@ -56,6 +56,7 @@ import {
   getTenantWaterReadings,
   getWaterBills,
   generateWaterBill,
+  getPreviousReading, // ✅ Add this import
 } from "../../services/water";
 import { getTenants } from "../../services/tenants";
 import { formatCurrency, formatDate } from "../../utils/formatters";
@@ -78,10 +79,12 @@ const MeterReadings = () => {
   const [editingReading, setEditingReading] = useState(null);
   const [selectedReading, setSelectedReading] = useState(null);
   const [selectedTenantId, setSelectedTenantId] = useState(null);
+  const [selectedTenant, setSelectedTenant] = useState(null); // ✅ Add this
   const [searchText, setSearchText] = useState("");
   const [tenantFilter, setTenantFilter] = useState("all");
   const [form] = Form.useForm();
   const [generatingBill, setGeneratingBill] = useState(false);
+  const [previousReadingLoading, setPreviousReadingLoading] = useState(false); // ✅ Add this
 
   // Stats
   const [stats, setStats] = useState({
@@ -102,7 +105,6 @@ const MeterReadings = () => {
     if (currentPropertyId) {
       fetchData();
     } else {
-      // Show message if no property selected
       setReadings([]);
       setFilteredReadings([]);
       setMonthlyData([]);
@@ -116,6 +118,55 @@ const MeterReadings = () => {
     }
   }, [currentPropertyId]);
 
+  // ✅ Fetch previous reading for a tenant
+  const fetchPreviousReading = async (tenantId) => {
+    setPreviousReadingLoading(true);
+    try {
+      console.log("🔍 Fetching previous reading for tenant:", tenantId);
+      const response = await getPreviousReading(tenantId);
+      const data = response.data;
+
+      console.log("📊 Previous reading response:", data);
+
+      if (data.has_previous) {
+        form.setFieldsValue({
+          previousReading: data.previous_reading,
+        });
+        message.info(
+          `📊 Previous reading: ${data.previous_reading} (from ${data.last_reading_date || "last reading"})`,
+        );
+      } else {
+        form.setFieldsValue({
+          previousReading: 0,
+        });
+        message.info("📝 New tenant - starting from 0");
+      }
+      return data;
+    } catch (error) {
+      console.error("Error fetching previous reading:", error);
+      form.setFieldsValue({
+        previousReading: 0,
+      });
+      return null;
+    } finally {
+      setPreviousReadingLoading(false);
+    }
+  };
+
+  // ✅ Handle tenant selection
+  const handleTenantSelect = async (value) => {
+    const tenant = tenants.find((t) => t.id === value);
+    if (tenant) {
+      setSelectedTenant(tenant);
+      form.setFieldsValue({
+        tenantId: value,
+        tenantName: tenant.name,
+      });
+      // ✅ Fetch previous reading
+      await fetchPreviousReading(value);
+    }
+  };
+
   const fetchData = async () => {
     if (!currentPropertyId) {
       message.warning("Please select a property first");
@@ -124,12 +175,10 @@ const MeterReadings = () => {
 
     setLoading(true);
     try {
-      // Fetch tenants for the current property
       const tenantsRes = await getTenants({ property_id: currentPropertyId });
       const tenantsList = tenantsRes.data || [];
       setTenants(tenantsList);
 
-      // Fetch water readings with property filter
       const readingsRes = await getWaterReadings({
         property_id: currentPropertyId,
       });
@@ -138,7 +187,6 @@ const MeterReadings = () => {
       setFilteredReadings(readingsList);
       calculateStats(readingsList);
 
-      // Fetch consumption history
       const historyRes = await getConsumptionHistory();
       setMonthlyData(historyRes.data || []);
     } catch (error) {
@@ -173,18 +221,21 @@ const MeterReadings = () => {
 
       const readingData = {
         tenantId: values.tenantId,
-        previousReading: values.previousReading,
-        currentReading: values.currentReading,
+        previousReading: parseFloat(values.previousReading) || 0,
+        currentReading: parseFloat(values.currentReading) || 0,
         readingDate: values.readingDate
           ? values.readingDate.format("YYYY-MM-DD")
           : new Date().toISOString().split("T")[0],
         notes: values.notes,
       };
 
+      console.log("📤 Submitting reading:", readingData);
+
       const response = await submitWaterReading(readingData);
       message.success("Water reading submitted successfully");
       setModalVisible(false);
       form.resetFields();
+      setSelectedTenant(null);
       fetchData();
     } catch (error) {
       console.error("Error submitting reading:", error);
@@ -194,7 +245,6 @@ const MeterReadings = () => {
 
   const handleDelete = async (id) => {
     try {
-      // Since we don't have a delete endpoint yet, use mock
       const updatedReadings = readings.filter((r) => r.id !== id);
       setReadings(updatedReadings);
       setFilteredReadings(updatedReadings);
@@ -567,6 +617,7 @@ const MeterReadings = () => {
               onClick={() => {
                 setEditingReading(null);
                 form.resetFields();
+                setSelectedTenant(null);
                 setModalVisible(true);
               }}
             >
@@ -664,6 +715,7 @@ const MeterReadings = () => {
         onCancel={() => {
           setModalVisible(false);
           setEditingReading(null);
+          setSelectedTenant(null);
           form.resetFields();
         }}
         footer={null}
@@ -672,7 +724,7 @@ const MeterReadings = () => {
       >
         <Alert
           message="How it works"
-          description="Enter the previous and current meter readings. The system will automatically calculate units used and the amount."
+          description="Select a tenant and enter the current meter reading. The previous reading will be auto-filled from the last reading."
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
@@ -689,6 +741,8 @@ const MeterReadings = () => {
               showSearch
               optionFilterProp="children"
               size="large"
+              onChange={handleTenantSelect} // ✅ Use the handler
+              loading={loading || previousReadingLoading}
             >
               {tenants.map((tenant) => (
                 <Option key={tenant.id} value={tenant.id}>
@@ -697,6 +751,22 @@ const MeterReadings = () => {
               ))}
             </Select>
           </Form.Item>
+
+          {selectedTenant && (
+            <div
+              style={{
+                marginBottom: 16,
+                padding: 8,
+                background: "#f5f5f5",
+                borderRadius: 4,
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#8c8c8c" }}>
+                Selected: <strong>{selectedTenant.name}</strong>
+                {selectedTenant.houseNo && ` - House ${selectedTenant.houseNo}`}
+              </div>
+            </div>
+          )}
 
           <Form.Item
             name="previousReading"
@@ -707,9 +777,19 @@ const MeterReadings = () => {
           >
             <Input
               type="number"
-              placeholder="e.g., 2450"
+              placeholder="Auto-filled from last reading"
               prefix={<ScheduleOutlined />}
               size="large"
+              disabled={false}
+              addonAfter={
+                previousReadingLoading ? (
+                  <span style={{ color: "#1890ff" }}>Loading...</span>
+                ) : (
+                  <Tooltip title="Auto-filled from last reading">
+                    <span style={{ color: "#52c41a" }}>✓ Auto</span>
+                  </Tooltip>
+                )
+              }
             />
           </Form.Item>
 
@@ -720,11 +800,12 @@ const MeterReadings = () => {
               { required: true, message: "Please enter current reading" },
               ({ getFieldValue }) => ({
                 validator(_, value) {
-                  const previous = getFieldValue("previousReading");
-                  if (value && previous && value <= previous) {
+                  const previous =
+                    parseFloat(getFieldValue("previousReading")) || 0;
+                  if (value && parseFloat(value) <= previous) {
                     return Promise.reject(
                       new Error(
-                        "Current reading must be greater than previous",
+                        "Current reading must be greater than previous reading",
                       ),
                     );
                   }
@@ -759,6 +840,7 @@ const MeterReadings = () => {
                 onClick={() => {
                   setModalVisible(false);
                   setEditingReading(null);
+                  setSelectedTenant(null);
                   form.resetFields();
                 }}
                 size="large"
@@ -907,7 +989,7 @@ const MeterReadings = () => {
                   setModalVisible(true);
                 }}
               >
-                Edit Reading 0{" "}
+                Edit Reading
               </Button>
               {selectedReading.status !== "billed" && (
                 <Button

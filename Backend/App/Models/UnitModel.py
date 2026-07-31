@@ -24,6 +24,7 @@ class Unit(db.Model):
     tenant = db.relationship('Tenant', back_populates='unit', uselist=False)
     payments = db.relationship('Payment', back_populates='unit')
     water_bills = db.relationship('WaterBill', back_populates='unit')
+    water_readings = db.relationship('WaterReading', back_populates='unit')
 
     def to_dict(self):
         return {
