@@ -18,7 +18,7 @@ alembic==1.12.1
 marshmallow==3.20.2
 flask-marshmallow==0.14.0
 marshmallow-sqlalchemy==0.29.0
-sqlalchemy-serializer==1.4.22
+sqlalchemy-serializer==1.4.12
 
 # Environment & CORS
 python-dotenv==1.0.0

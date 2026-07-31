@@ -3,11 +3,13 @@ from App.Extension import db
 from App.Models.PaymentModel import Payment
 from App.Models.TenantModel import Tenant
 from App.Models.PropertyModel import Property
+from App.Models.UnitModel import Unit
 from App.Services.MpesaService import MpesaService
 from App.Services.NotificationService import NotificationService
 from datetime import datetime
 import uuid
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,16 @@ class PaymentService:
             # Generate receipt number
             receipt_no = f"RCP-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
 
+            # Get property to generate account reference
+            property = Property.query.get(tenant.property_id)
+            if not property:
+                raise ValueError("Property not found")
+
+            # Generate account reference: PHONE_LAST_8#HOUSE_NO
+            account_ref = property.generate_account_reference(
+                tenant.unit.unit_number if tenant.unit else "HOUSE"
+            )
+
             # Create payment record
             payment = Payment(
                 property_id=tenant.property_id,
@@ -35,6 +47,7 @@ class PaymentService:
                 unit_id=tenant.unit_id,
                 amount=amount,
                 receipt_no=receipt_no,
+                account_reference=account_ref,
                 payment_method='mpesa',
                 status='pending',
                 phone_number=phone_number,
@@ -46,7 +59,6 @@ class PaymentService:
             db.session.flush()  # Get payment ID
 
             # Initiate STK Push
-            account_ref = f"RENT-{tenant_id}-{datetime.now().strftime('%Y%m%d')}"
             result = self.mpesa.stk_push(
                 phone_number=phone_number,
                 amount=amount,
@@ -84,6 +96,86 @@ class PaymentService:
             db.session.rollback()
             return {'success': False, 'error': str(e)}
 
+    def process_paybill_payment(self, account_reference, amount, phone_number, mpesa_code):
+        """
+        Process Paybill payment from M-Pesa callback.
+        Account reference format: PHONE_LAST_8#HOUSE_NO (e.g., 40766915#A01)
+        """
+        try:
+            logger.info(f"Processing Paybill payment: {account_reference}, amount: {amount}")
+
+            # Parse account reference
+            if '#' not in account_reference:
+                raise ValueError(f"Invalid account reference format: {account_reference}")
+
+            phone_last_8, house_no = account_reference.split('#', 1)
+            phone_last_8 = phone_last_8.strip()
+            house_no = house_no.strip()
+
+            # Find property by phone_last_8
+            property = Property.query.filter_by(mpesa_account_prefix=phone_last_8).first()
+            if not property:
+                raise ValueError(f"Property not found for account: {phone_last_8}")
+
+            # Find tenant by property and house number
+            tenant = Tenant.query.join(Tenant.unit).filter(
+                Tenant.property_id == property.id,
+                Unit.unit_number == house_no
+            ).first()
+
+            if not tenant:
+                raise ValueError(f"Tenant not found for house: {house_no} in property {property.name}")
+
+            # Generate receipt number
+            receipt_no = f"PB-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+
+            # Create payment - FIXED: use 'paid' instead of 'completed'
+            payment = Payment(
+                property_id=property.id,
+                tenant_id=tenant.id,
+                unit_id=tenant.unit_id,
+                amount=amount,
+                receipt_no=receipt_no,
+                account_reference=account_reference,
+                phone_number=phone_number,
+                mpesa_code=mpesa_code,
+                payment_method='mpesa',
+                status='paid',  # ✅ CHANGED from 'completed' to 'paid'
+                payment_for_month=datetime.now().date(),
+                payment_date=datetime.now(),
+                completed_at=datetime.now()
+            )
+
+            db.session.add(payment)
+            db.session.flush()
+
+            # Allocate payment
+            from App.Services.PaymentAllocationService import PaymentAllocationService
+            allocator = PaymentAllocationService(payment.id)
+            allocation_result = allocator.allocate()
+
+            if allocation_result.get('success'):
+                return {
+                    'success': True,
+                    'payment': payment.to_dict(),
+                    'allocation': allocation_result,
+                    'message': f"Payment received from {tenant.name} (House {house_no})"
+                }
+            else:
+                # If allocation fails, still mark as paid
+                payment.status = 'paid'
+                db.session.commit()
+                return {
+                    'success': True,
+                    'payment': payment.to_dict(),
+                    'message': f"Payment recorded but allocation failed: {allocation_result.get('error', 'Unknown error')}"
+                }
+
+        except Exception as e:
+            logger.error(f"Error processing Paybill payment: {str(e)}")
+            db.session.rollback()
+            return {'success': False, 'error': str(e)}
+
     def confirm_payment(self, payment_id, transaction_data):
         """Confirm payment after callback"""
         try:
@@ -91,8 +183,8 @@ class PaymentService:
             if not payment:
                 raise ValueError("Payment not found")
 
-            # Update payment
-            payment.status = 'completed'
+            # Update payment - FIXED: use 'paid' instead of 'completed'
+            payment.status = 'paid'  # ✅ CHANGED from 'completed' to 'paid'
             payment.completed_at = datetime.now()
             payment.mpesa_receipt_number = transaction_data.get('mpesa_receipt_number')
             payment.transaction_id = transaction_data.get('transaction_id')
@@ -142,6 +234,15 @@ class PaymentService:
                     }
 
                     return self.confirm_payment(payment.id, transaction_data)
+
+                # If no payment found, check if it's a Paybill payment
+                # Get account reference from callback
+                account_ref = callback_data.get('Body', {}).get('stkCallback', {}).get('AccountReference')
+                if account_ref and '#' in account_ref:
+                    amount = parsed.get('amount', 0)
+                    phone = parsed.get('phone', '')
+                    mpesa_code = parsed.get('mpesa_code', '')
+                    return self.process_paybill_payment(account_ref, amount, phone, mpesa_code)
 
                 return {'success': False, 'error': 'Payment not found'}
 
@@ -210,7 +311,7 @@ class PaymentService:
                 amount=amount,
                 receipt_no=receipt_no,
                 payment_method=payment_method,
-                status='completed',
+                status='paid',  # ✅ CHANGED from 'completed' to 'paid'
                 payment_for_month=datetime.now().date(),
                 payment_date=datetime.now(),
                 completed_at=datetime.now(),
@@ -218,16 +319,18 @@ class PaymentService:
             )
 
             db.session.add(payment)
+            db.session.flush()
 
-            # Update tenant balance
-            tenant.balance = (tenant.balance or 0) - amount
+            # Allocate payment
+            from App.Services.PaymentAllocationService import PaymentAllocationService
+            allocator = PaymentAllocationService(payment.id)
+            allocation_result = allocator.allocate()
 
-            db.session.commit()
-
-            # Send receipt
-            NotificationService.send_receipt(tenant, payment)
-
-            return {'success': True, 'payment': payment.to_dict()}
+            return {
+                'success': True,
+                'payment': payment.to_dict(),
+                'allocation': allocation_result
+            }
 
         except Exception as e:
             logger.error(f"Error creating manual payment: {str(e)}")
@@ -269,7 +372,7 @@ class PaymentService:
             if property_id:
                 query = query.filter_by(property_id=property_id)
 
-            total_collected = sum([p.amount for p in query.filter_by(status='completed').all()])
+            total_collected = sum([p.amount for p in query.filter_by(status='paid').all()])  # ✅ CHANGED from 'completed' to 'paid'
             pending = query.filter_by(status='pending').count()
             failed = query.filter_by(status='failed').count()
 

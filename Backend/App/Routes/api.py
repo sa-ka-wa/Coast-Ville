@@ -264,6 +264,76 @@ def reverse_payment(payment_id):
     """Reverse/refund a payment"""
     return PaymentController.reverse_payment(payment_id)
 
+
+# App/Routes/api.py - Add this in the PAYMENT ROUTES section after the summary route
+
+# ============================================================
+# PAYBILL PAYMENT ROUTES
+# ============================================================
+
+@api_bp.route('/payments/paybill', methods=['POST'])
+def process_paybill_payment():
+    """Process a Paybill payment from M-Pesa"""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        data = request.json
+        account_reference = data.get('account_reference')
+        amount = data.get('amount')
+        phone_number = data.get('phone_number')
+        mpesa_code = data.get('mpesa_code')
+
+        logger.info(f"📥 Paybill payment received: {account_reference}, amount: {amount}")
+
+        if not account_reference or not amount:
+            return jsonify({'error': 'account_reference and amount required'}), 400
+
+        from App.Services.PaymentService import PaymentService
+        service = PaymentService()
+        result = service.process_paybill_payment(
+            account_reference=account_reference,
+            amount=amount,
+            phone_number=phone_number,
+            mpesa_code=mpesa_code
+        )
+
+        if result.get('success'):
+            logger.info(f"✅ Paybill payment successful: {result.get('message')}")
+            return jsonify(result), 200
+        else:
+            logger.error(f"❌ Paybill payment failed: {result.get('error')}")
+            return jsonify(result), 400
+
+    except Exception as e:
+        logger.error(f"Error processing paybill payment: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/payments/test-paybill', methods=['GET'])
+def test_paybill_config():
+    """Test endpoint to verify Paybill configuration"""
+    from App.Models.PropertyModel import Property
+
+    properties = Property.query.all()
+    result = []
+    for prop in properties:
+        result.append({
+            'id': prop.id,
+            'name': prop.name,
+            'mpesa_paybill': prop.mpesa_paybill,
+            'mpesa_account_prefix': prop.mpesa_account_prefix,
+            'sample_account_ref': f"{prop.mpesa_account_prefix}#A01" if prop.mpesa_account_prefix else None,
+            'owner_phone': prop.owner_phone,
+            'owner_phone_last_8': prop.owner_phone_last_8 if hasattr(prop, 'owner_phone_last_8') else None
+        })
+
+    return jsonify({
+        'properties': result,
+        'paybill_format': 'Paybill: 247247, Account: PHONE_LAST_8#HOUSE_NO (e.g., 40766915#A01)',
+        'instruction': 'Use account_reference format: mpesa_account_prefix#house_no'
+    }), 200
+
 # ============================================================
 # EXPENSE ROUTES
 # ============================================================
