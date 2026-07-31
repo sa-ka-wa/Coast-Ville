@@ -2,32 +2,73 @@
 from flask import Flask
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
+from flask_migrate import Migrate
 from App.Extension import db, migrate
 from App.Routes.auth import auth_bp
 from App.Routes.api import api_bp
 import os
 from dotenv import load_dotenv
+import logging
 
 # Force load .env at the very beginning
 load_dotenv(override=True)
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 
 
 def create_app():
     app = Flask(__name__)
 
     # Configuration
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///instance/app.db')
-    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
     app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
     app.config['JWT_ACCESS_TOKEN_EXPIRES'] = 86400  # 24 hours
+
+    # Database configuration with connection pooling
+    database_url = os.getenv('DATABASE_URL', 'sqlite:///instance/app.db')
+
+    # Add SSL mode if using Render PostgreSQL
+    if 'render.com' in database_url and 'sslmode' not in database_url:
+        if '?' in database_url:
+            database_url += '&sslmode=require'
+        else:
+            database_url += '?sslmode=require'
+
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+    # ✅ Connection pooling configuration
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_size': 10,
+        'pool_recycle': 3600,  # Recycle connections after 1 hour
+        'pool_pre_ping': True,  # Check connection before using
+        'pool_timeout': 30,
+        'max_overflow': 20,
+        'connect_args': {
+            'sslmode': 'require',
+            'connect_timeout': 10,
+        }
+    }
 
     # Initialize extensions
     db.init_app(app)
     migrate.init_app(app, db)
     jwt = JWTManager(app)
-    CORS(app, origins='*')
+
+    # ✅ CORS - Allow your frontend
+    CORS(app,
+         origins=[
+             'https://src-seven-rosy-67.vercel.app',
+             'https://coast-ville-1.onrender.com',
+             'http://localhost:3000',
+             'http://localhost:5173',
+             'https://*.vercel.app',
+             'https://*.onrender.com'
+         ],
+         supports_credentials=True,
+         allow_headers=['Content-Type', 'Authorization'],
+         methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
+         )
 
     # Register blueprints
     app.register_blueprint(auth_bp, url_prefix='/api/auth')

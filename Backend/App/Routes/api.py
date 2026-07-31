@@ -29,6 +29,27 @@ def test():
 def protected():
     return jsonify({'message': 'This is a protected route!'}), 200
 
+# App/Routes/api.py - Add this after the health check
+
+@api_bp.route('/db-health', methods=['GET'])
+def db_health():
+    """Check database connection health"""
+    try:
+        from App.Extension import db
+        from sqlalchemy import text
+        result = db.session.execute(text("SELECT 1")).fetchone()
+        return jsonify({
+            'status': 'healthy',
+            'database': 'connected',
+            'result': result[0]
+        }), 200
+    except Exception as e:
+        logger.error(f"Database health check failed: {str(e)}")
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e)
+        }), 500
+
 # ============================================================
 # PROPERTY ROUTES
 # ============================================================
