@@ -26,7 +26,8 @@ import AdminPayments from "./pages/Admin/Payments";
 import WaterBills from "./pages/Admin/WaterBills";
 import Reports from "./pages/Admin/Reports";
 import MobileDashboard from "./pages/Caretaker/MobileDashboard";
-import PropertySettings from "./pages/Admin/PropertySettings"; // ← ADD THIS
+import PropertySettings from "./pages/Admin/PropertySettings";
+import MonthlyBilling from "./pages/Admin/MonthlyBilling";
 
 const { Content } = Layout;
 
@@ -92,6 +93,7 @@ const AppContent = () => {
                   <Route path="/admin/payments" element={<AdminPayments />} />
                   <Route path="/admin/water" element={<WaterBills />} />
                   <Route path="/admin/reports" element={<Reports />} />
+                  <Route path="/admin/billing" element={<MonthlyBilling />} />
                   <Route
                     path="/admin/property-settings"
                     element={<PropertySettings />}

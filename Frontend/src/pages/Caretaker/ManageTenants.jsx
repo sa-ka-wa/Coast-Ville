@@ -42,7 +42,7 @@ import {
   EyeOutlined,
   MessageOutlined,
 } from "@ant-design/icons";
-import { useNavigate } from "react-router-dom"; // ← ADD THIS IMPORT
+import { useNavigate } from "react-router-dom";
 import {
   getTenants,
   addTenant,
@@ -62,7 +62,7 @@ const { Option } = Select;
 const { TextArea } = Input;
 
 const ManageTenants = ({ propertyId, propertyName }) => {
-  const navigate = useNavigate(); // ← ADD THIS
+  const navigate = useNavigate();
 
   console.log(
     "🔍🔍🔍 ManageTenants PROPS - propertyId:",
@@ -148,6 +148,7 @@ const ManageTenants = ({ propertyId, propertyName }) => {
     }
   };
 
+  // ✅ FIXED: Map backend fields to frontend fields
   const fetchTenants = async (id) => {
     setLoading(true);
     try {
@@ -157,10 +158,23 @@ const ManageTenants = ({ propertyId, propertyName }) => {
       }
       console.log("📡 Fetching tenants with filters:", filters);
       const response = await getTenants(filters);
-      console.log("✅ Tenants received:", response.data.length);
-      setTenants(response.data);
-      setFilteredTenants(response.data);
-      calculateStats(response.data);
+
+      // ✅ Map backend fields to frontend fields
+      const mappedTenants = response.data.map((tenant) => ({
+        ...tenant,
+        monthlyRent: tenant.monthly_rent || 0,
+        moveInDate: tenant.move_in_date,
+        moveOutDate: tenant.move_out_date,
+        houseNo: tenant.houseNo || tenant.unit?.unit_number || "N/A",
+        deposit: tenant.deposit || 0,
+        balance: tenant.balance || 0,
+        collected: tenant.collected || 0,
+      }));
+
+      console.log("✅ Tenants received:", mappedTenants.length);
+      setTenants(mappedTenants);
+      setFilteredTenants(mappedTenants);
+      calculateStats(mappedTenants);
     } catch (error) {
       message.error("Failed to fetch tenants");
       console.error("Error fetching tenants:", error);
@@ -189,18 +203,33 @@ const ManageTenants = ({ propertyId, propertyName }) => {
     });
   };
 
+  // ✅ FIXED: Send monthly_rent (backend field name) instead of monthlyRent
   const handleAddEdit = async (values) => {
     try {
       const tenantData = {
-        ...values,
+        name: values.name,
+        phone: values.phone,
+        unit_id: values.unit_id,
+        monthly_rent: parseFloat(values.monthlyRent) || 0,
+        deposit: parseFloat(values.deposit) || 0,
+        move_in_date: values.moveInDate || null,
+        status: values.status || "active",
         property_id: currentPropertyId,
+        email: values.email || "",
+        id_number: values.id_number || "",
+        emergency_contact_name: values.emergency_contact_name || "",
+        emergency_contact_phone: values.emergency_contact_phone || "",
+        notes: values.notes || "",
       };
+
+      console.log("📝 Saving tenant data:", tenantData);
 
       if (editingTenant) {
         await updateTenant(editingTenant.id, tenantData);
         message.success("Tenant updated successfully");
       } else {
-        await addTenant(tenantData);
+        const response = await addTenant(tenantData);
+        console.log("✅ Tenant added:", response.data);
         message.success("Tenant added successfully");
       }
       setModalVisible(false);
@@ -209,7 +238,8 @@ const ManageTenants = ({ propertyId, propertyName }) => {
       fetchTenants(currentPropertyId);
       fetchUnits();
     } catch (error) {
-      message.error("Operation failed");
+      console.error("❌ Error saving tenant:", error);
+      message.error(error.response?.data?.message || "Operation failed");
     }
   };
 
@@ -261,6 +291,16 @@ const ManageTenants = ({ propertyId, propertyName }) => {
   const handleViewDetails = (tenant) => {
     setSelectedTenant(tenant);
     setDetailVisible(true);
+  };
+
+  const handleUnitSelect = (unitId) => {
+    const selectedUnit = units.find((u) => u.id === unitId);
+    if (selectedUnit && selectedUnit.monthly_rent) {
+      form.setFieldsValue({
+        monthlyRent: selectedUnit.monthly_rent,
+      });
+      message.info(`Rent set to ${formatCurrency(selectedUnit.monthly_rent)}`);
+    }
   };
 
   const columns = [
@@ -353,7 +393,7 @@ const ManageTenants = ({ propertyId, propertyName }) => {
             <Button
               icon={<EyeOutlined />}
               size="small"
-              onClick={() => navigate(`/caretaker/tenants/${record.id}`)} // ← UPDATED
+              onClick={() => navigate(`/caretaker/tenants/${record.id}`)}
             />
           </Tooltip>
           <Tooltip title="Edit">
@@ -362,7 +402,20 @@ const ManageTenants = ({ propertyId, propertyName }) => {
               size="small"
               onClick={() => {
                 setEditingTenant(record);
-                form.setFieldsValue(record);
+                form.setFieldsValue({
+                  name: record.name,
+                  phone: record.phone,
+                  unit_id: record.unit_id,
+                  monthlyRent: record.monthlyRent || 0,
+                  deposit: record.deposit || 0,
+                  moveInDate: record.moveInDate,
+                  status: record.status,
+                  email: record.email || "",
+                  id_number: record.id_number || "",
+                  emergency_contact_name: record.emergency_contact_name || "",
+                  emergency_contact_phone: record.emergency_contact_phone || "",
+                  notes: record.notes || "",
+                });
                 setModalVisible(true);
               }}
             />
@@ -604,7 +657,7 @@ const ManageTenants = ({ propertyId, propertyName }) => {
           form.resetFields();
         }}
         footer={null}
-        width={600}
+        width={700}
         destroyOnHidden
       >
         <Alert
@@ -622,6 +675,8 @@ const ManageTenants = ({ propertyId, propertyName }) => {
           initialValues={{
             status: "active",
             property_id: currentPropertyId,
+            monthlyRent: 0,
+            deposit: 0,
           }}
         >
           <Row gutter={16}>
@@ -664,6 +719,27 @@ const ManageTenants = ({ propertyId, propertyName }) => {
             </Col>
             <Col span={12}>
               <Form.Item
+                name="email"
+                label="Email Address"
+                rules={[
+                  {
+                    type: "email",
+                    message: "Please enter a valid email address",
+                  },
+                ]}
+              >
+                <Input
+                  prefix={<MailOutlined />}
+                  placeholder="john@example.com"
+                  size="large"
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
                 name="unit_id"
                 label="Unit / House Number"
                 rules={[{ required: true, message: "Please select a unit" }]}
@@ -675,6 +751,7 @@ const ManageTenants = ({ propertyId, propertyName }) => {
                   loading={loadingUnits}
                   showSearch
                   optionFilterProp="children"
+                  onChange={handleUnitSelect}
                   notFoundContent={
                     loadingUnits ? <Spin size="small" /> : "No available units"
                   }
@@ -707,6 +784,19 @@ const ManageTenants = ({ propertyId, propertyName }) => {
                 </Select>
               </Form.Item>
             </Col>
+            <Col span={12}>
+              <Form.Item
+                name="status"
+                label="Status"
+                rules={[{ required: true }]}
+              >
+                <Select size="large">
+                  <Option value="active">Active</Option>
+                  <Option value="vacating">Vacating</Option>
+                  <Option value="vacated">Vacated</Option>
+                </Select>
+              </Form.Item>
+            </Col>
           </Row>
 
           <Row gutter={16}>
@@ -716,6 +806,11 @@ const ManageTenants = ({ propertyId, propertyName }) => {
                 label="Monthly Rent (Ksh)"
                 rules={[
                   { required: true, message: "Please enter monthly rent" },
+                  {
+                    type: "number",
+                    min: 0,
+                    message: "Rent must be 0 or greater",
+                  },
                 ]}
               >
                 <Input
@@ -723,6 +818,8 @@ const ManageTenants = ({ propertyId, propertyName }) => {
                   type="number"
                   placeholder="15000"
                   size="large"
+                  min={0}
+                  step={100}
                 />
               </Form.Item>
             </Col>
@@ -733,6 +830,8 @@ const ManageTenants = ({ propertyId, propertyName }) => {
                   type="number"
                   placeholder="15000"
                   size="large"
+                  min={0}
+                  step={100}
                 />
               </Form.Item>
             </Col>
@@ -745,15 +844,22 @@ const ManageTenants = ({ propertyId, propertyName }) => {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="status" label="Status">
-                <Select size="large">
-                  <Option value="active">Active</Option>
-                  <Option value="vacating">Vacating</Option>
-                  <Option value="vacated">Vacated</Option>
-                </Select>
+              <Form.Item name="emergency_contact_phone" label="Emergency Phone">
+                <Input
+                  prefix={<PhoneOutlined />}
+                  placeholder="0712345678"
+                  size="large"
+                />
               </Form.Item>
             </Col>
           </Row>
+
+          <Form.Item name="notes" label="Notes">
+            <TextArea
+              rows={2}
+              placeholder="Any additional notes about this tenant..."
+            />
+          </Form.Item>
 
           <Form.Item style={{ marginTop: 16, marginBottom: 0 }}>
             <Space style={{ width: "100%", justifyContent: "flex-end" }}>
@@ -889,7 +995,22 @@ const ManageTenants = ({ propertyId, propertyName }) => {
                 onClick={() => {
                   setDetailVisible(false);
                   setEditingTenant(selectedTenant);
-                  form.setFieldsValue(selectedTenant);
+                  form.setFieldsValue({
+                    name: selectedTenant.name,
+                    phone: selectedTenant.phone,
+                    unit_id: selectedTenant.unit_id,
+                    monthlyRent: selectedTenant.monthlyRent || 0,
+                    deposit: selectedTenant.deposit || 0,
+                    moveInDate: selectedTenant.moveInDate,
+                    status: selectedTenant.status,
+                    email: selectedTenant.email || "",
+                    id_number: selectedTenant.id_number || "",
+                    emergency_contact_name:
+                      selectedTenant.emergency_contact_name || "",
+                    emergency_contact_phone:
+                      selectedTenant.emergency_contact_phone || "",
+                    notes: selectedTenant.notes || "",
+                  });
                   setModalVisible(true);
                 }}
               >

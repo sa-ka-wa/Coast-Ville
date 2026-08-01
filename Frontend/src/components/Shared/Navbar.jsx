@@ -23,6 +23,7 @@ import {
   WalletOutlined,
   MenuOutlined,
   SwapOutlined,
+  CalendarOutlined, // ✅ Added for Billing icon
 } from "@ant-design/icons";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
@@ -95,6 +96,7 @@ const Navbar = () => {
     }
   };
 
+  // ✅ Updated Admin menu items with Billing
   const menuItems = isAdmin
     ? [
         {
@@ -116,6 +118,11 @@ const Navbar = () => {
           key: "/admin/water",
           icon: <ScheduleOutlined />,
           label: "Water Bills",
+        },
+        {
+          key: "/admin/billing", // ✅ Added Billing route
+          icon: <CalendarOutlined />,
+          label: "Monthly Billing",
         },
         {
           key: "/admin/reports",
