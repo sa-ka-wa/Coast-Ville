@@ -11,26 +11,26 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+
 class WhatsAppService:
-    
     # ✅ Read from environment variables
     WHATSAPP_ACCESS_TOKEN = os.getenv('WHATSAPP_ACCESS_TOKEN')
     WHATSAPP_PHONE_NUMBER_ID = os.getenv('WHATSAPP_PHONE_NUMBER_ID')
     WHATSAPP_API_VERSION = os.getenv('WHATSAPP_API_VERSION', 'v18.0')
     WHATSAPP_FROM_NUMBER = os.getenv('WHATSAPP_FROM_NUMBER')
-    
+
     # Construct the API URL
     WHATSAPP_API_URL = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{WHATSAPP_PHONE_NUMBER_ID}/messages"
-    
+
     @staticmethod
     def is_configured():
         """Check if WhatsApp is properly configured"""
         return bool(
-            WhatsAppService.WHATSAPP_ACCESS_TOKEN and 
+            WhatsAppService.WHATSAPP_ACCESS_TOKEN and
             WhatsAppService.WHATSAPP_PHONE_NUMBER_ID and
             WhatsAppService.WHATSAPP_ACCESS_TOKEN != 'YOUR_ACCESS_TOKEN'
         )
-    
+
     @staticmethod
     def send_whatsapp_message(to_phone, message, message_type="text"):
         """Send a WhatsApp message using WhatsApp Business API"""
@@ -38,17 +38,17 @@ class WhatsAppService:
             if not WhatsAppService.is_configured():
                 logger.error("❌ WhatsApp not configured. Please set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID")
                 return {"success": False, "error": "WhatsApp not configured"}
-            
+
             # Clean phone number
             phone = WhatsAppService._clean_phone_number(to_phone)
-            
+
             # Prepare the payload
             payload = {
                 "messaging_product": "whatsapp",
                 "recipient_type": "individual",
                 "to": phone,
             }
-            
+
             if message_type == "text":
                 payload["type"] = "text"
                 payload["text"] = {
@@ -58,43 +58,43 @@ class WhatsAppService:
             elif message_type == "template":
                 payload["type"] = "template"
                 payload["template"] = message
-            
+
             headers = {
                 "Authorization": f"Bearer {WhatsAppService.WHATSAPP_ACCESS_TOKEN}",
                 "Content-Type": "application/json"
             }
-            
+
             logger.info(f"📤 Sending WhatsApp message to {phone}")
-            
+
             response = requests.post(
                 WhatsAppService.WHATSAPP_API_URL,
                 headers=headers,
                 json=payload,
                 timeout=30
             )
-            
+
             if response.status_code in [200, 201]:
                 logger.info(f"✅ WhatsApp message sent to {phone}")
                 return {
-                    "success": True, 
+                    "success": True,
                     "data": response.json(),
                     "message_id": response.json().get('messages', [{}])[0].get('id')
                 }
             else:
                 logger.error(f"❌ WhatsApp API error: {response.text}")
                 return {
-                    "success": False, 
+                    "success": False,
                     "error": response.text,
                     "status_code": response.status_code
                 }
-                
+
         except requests.exceptions.Timeout:
             logger.error("❌ WhatsApp API timeout")
             return {"success": False, "error": "Request timeout"}
         except Exception as e:
             logger.error(f"❌ WhatsApp send error: {str(e)}")
             return {"success": False, "error": str(e)}
-    
+
     @staticmethod
     def send_template_message(to_phone, template_name, components=None):
         """Send a WhatsApp template message"""
@@ -102,41 +102,41 @@ class WhatsAppService:
             "name": template_name,
             "language": {"code": "en"}
         }
-        
+
         if components:
             template["components"] = components
-        
+
         return WhatsAppService.send_whatsapp_message(
-            to_phone, 
-            template, 
+            to_phone,
+            template,
             message_type="template"
         )
-    
+
     @staticmethod
     def send_bill_receipt(tenant, payment):
         """Send a bill receipt via WhatsApp"""
         try:
             if not tenant.phone:
                 return {"success": False, "error": "Tenant has no phone number"}
-            
+
             # Format the receipt message
             message = WhatsAppService.format_receipt_message(tenant, payment)
-            
+
             # Send via WhatsApp
             result = WhatsAppService.send_whatsapp_message(tenant.phone, message)
-            
+
             # Log the result
             if result.get('success'):
                 logger.info(f"✅ Receipt sent to {tenant.name} via WhatsApp")
             else:
                 logger.error(f"❌ Failed to send receipt to {tenant.name}: {result.get('error')}")
-            
+
             return result
-            
+
         except Exception as e:
             logger.error(f"❌ Error sending receipt: {str(e)}")
             return {"success": False, "error": str(e)}
-    
+
     @staticmethod
     def format_receipt_message(tenant, payment):
         """Format a receipt message for WhatsApp"""
@@ -147,7 +147,8 @@ class WhatsAppService:
         lines.append("")
         lines.append("✅ Payment Received")
         lines.append("")
-        lines.append(f"📅 Date: {payment.payment_date.strftime('%d/%m/%Y') if payment.payment_date else datetime.now().strftime('%d/%m/%Y')}")
+        lines.append(
+            f"📅 Date: {payment.payment_date.strftime('%d/%m/%Y') if payment.payment_date else datetime.now().strftime('%d/%m/%Y')}")
         lines.append(f"🏠 House: {tenant.unit.unit_number if tenant.unit else 'N/A'}")
         lines.append(f"💰 Amount: KSh {payment.amount:,.2f}")
         lines.append(f"📋 Receipt No: {payment.receipt_no}")
@@ -164,16 +165,16 @@ class WhatsAppService:
         lines.append("")
         lines.append("RentManager System")
         lines.append("📞 Support: 0712345678")
-        
+
         return "\n".join(lines)
-    
+
     @staticmethod
     def send_monthly_statement(tenant, month, rent_due, water_due, total_due, balance):
         """Send monthly statement via WhatsApp"""
         try:
             if not tenant.phone:
                 return {"success": False, "error": "Tenant has no phone number"}
-            
+
             lines = []
             lines.append("🏠 RENT MANAGER - MONTHLY STATEMENT")
             lines.append("")
@@ -199,22 +200,22 @@ class WhatsAppService:
             lines.append("")
             lines.append("RentManager System")
             lines.append("📞 Support: 0712345678")
-            
+
             message = "\n".join(lines)
-            
+
             return WhatsAppService.send_whatsapp_message(tenant.phone, message)
-            
+
         except Exception as e:
             logger.error(f"❌ Error sending monthly statement: {str(e)}")
             return {"success": False, "error": str(e)}
-    
+
     @staticmethod
     def send_rent_reminder(tenant, amount, due_date):
         """Send rent reminder via WhatsApp"""
         try:
             if not tenant.phone:
                 return {"success": False, "error": "Tenant has no phone number"}
-            
+
             lines = []
             lines.append("🔔 RENT REMINDER")
             lines.append("")
@@ -235,30 +236,30 @@ class WhatsAppService:
             lines.append("Thank you!")
             lines.append("")
             lines.append("RentManager System")
-            
+
             message = "\n".join(lines)
-            
+
             return WhatsAppService.send_whatsapp_message(tenant.phone, message)
-            
+
         except Exception as e:
             logger.error(f"❌ Error sending rent reminder: {str(e)}")
             return {"success": False, "error": str(e)}
-    
+
     @staticmethod
     def _clean_phone_number(phone):
         """Clean and format phone number for WhatsApp API"""
         # Remove any non-digit characters
         phone = ''.join(filter(str.isdigit, str(phone)))
-        
+
         # Remove leading 0 or 254
         if phone.startswith('0'):
             phone = '254' + phone[1:]
         elif phone.startswith('254'):
             phone = '254' + phone[3:]
-        
+
         # Ensure it starts with 254
         if not phone.startswith('254'):
             phone = '254' + phone
-        
+
         # WhatsApp requires no '+' for the API, but includes it for display
         return phone

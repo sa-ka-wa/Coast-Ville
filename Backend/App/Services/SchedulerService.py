@@ -34,8 +34,8 @@ class SchedulerService:
             # 1. Generate rent bills on the 1st
             if today.day == 1:
                 rent_result = SchedulerService.generate_monthly_rent()
-                results['rent_generated'] = rent_result
-                logger.info(f"💰 Rent generated: {rent_result} tenants")
+                results['rent_generated'] = rent_result.get('generated', 0)
+                logger.info(f"💰 Rent generated: {results['rent_generated']} tenants")
 
                 # 2. Send monthly statements to tenants (after generating rent)
                 statement_result = SchedulerService.send_monthly_statements()
@@ -51,20 +51,20 @@ class SchedulerService:
             # 4. Generate water bills on the 25th (if readings taken)
             if today.day >= 25 and today.day <= 28:
                 water_result = SchedulerService.generate_monthly_water_bills()
-                results['water_bills_generated'] = water_result
-                logger.info(f"💧 Water bills generated: {water_result}")
+                results['water_bills_generated'] = water_result.get('generated', 0)
+                logger.info(f"💧 Water bills generated: {results['water_bills_generated']}")
 
             # 5. Check overdue payments daily (after 5th)
             if today.day >= 5:
                 overdue_result = SchedulerService.check_overdue_payments()
-                results['overdue_notifications'] = overdue_result
-                logger.info(f"📱 Overdue notifications sent: {overdue_result}")
+                results['overdue_notifications'] = overdue_result.get('notified', 0)
+                logger.info(f"📱 Overdue notifications sent: {results['overdue_notifications']}")
 
             # 6. Generate estimated bills on the 30th/31st for missing readings
             if today.day >= 30:
                 estimated_result = SchedulerService.generate_estimated_water_bills()
-                results['estimated_bills'] = estimated_result
-                logger.info(f"📊 Estimated bills generated: {estimated_result}")
+                results['estimated_bills'] = estimated_result.get('generated', 0)
+                logger.info(f"📊 Estimated bills generated: {results['estimated_bills']}")
 
             logger.info("✅ Monthly tasks completed: %s", results)
 
@@ -76,49 +76,99 @@ class SchedulerService:
         return results
 
     @staticmethod
-    def generate_monthly_rent():
-        """Generate rent for all active tenants on the 1st"""
+    def generate_monthly_rent(year=None, month=None):
+        """Generate rent for all active tenants for a specific month"""
         try:
-            today = datetime.now().date()
-            month_start = today.replace(day=1)
+            # Use provided year/month or default to current
+            if year is None or month is None:
+                today = datetime.now().date()
+                year = today.year
+                month = today.month
+
+            month_start = datetime(year, month, 1).date()
 
             # Get all active tenants
             tenants = Tenant.query.filter_by(status='active').all()
-            count = 0
+            generated = 0
+            errors = []
+            skipped = []
 
             for tenant in tenants:
-                # Check if rent already exists for this month
-                existing_payment = Payment.query.filter(
-                    Payment.tenant_id == tenant.id,
-                    Payment.payment_for_month == month_start
-                ).first()
+                try:
+                    # Check if rent already exists for this month
+                    existing = Payment.query.filter(
+                        Payment.tenant_id == tenant.id,
+                        Payment.payment_for_month == month_start,
+                        Payment.payment_type == 'rent'
+                    ).first()
 
-                if not existing_payment:
-                    # Create a pending rent record
+                    if existing:
+                        skipped.append({
+                            'tenant': tenant.name,
+                            'reason': 'Already exists'
+                        })
+                        continue
+
+                    # Skip if no monthly rent set
+                    if not tenant.monthly_rent or tenant.monthly_rent <= 0:
+                        skipped.append({
+                            'tenant': tenant.name,
+                            'reason': f'No rent amount set (current: {tenant.monthly_rent})'
+                        })
+                        continue
+
+                    # Create rent payment record
                     payment = Payment(
                         property_id=tenant.property_id,
                         tenant_id=tenant.id,
                         unit_id=tenant.unit_id,
-                        amount=tenant.monthly_rent or 0,
-                        receipt_no=f"RENT-{today.strftime('%Y%m')}-{tenant.id}",
+                        amount=tenant.monthly_rent,
+                        receipt_no=f"RENT-{month_start.strftime('%Y%m')}-{tenant.id}",
                         payment_date=datetime.utcnow(),
                         payment_method='pending',
                         status='pending',
+                        payment_type='rent',
                         payment_for_month=month_start,
-                        notes=f"Rent for {month_start.strftime('%B %Y')} - Auto-generated",
+                        notes=f'Rent for {month_start.strftime("%B %Y")} - Auto-generated',
                         created_at=datetime.utcnow()
                     )
+
                     db.session.add(payment)
-                    count += 1
+                    generated += 1
+
+                    logger.info(f"💰 Generated rent for {tenant.name}: KSh {tenant.monthly_rent:,.2f}")
+
+                except Exception as e:
+                    errors.append({
+                        'tenant': tenant.name,
+                        'error': str(e)
+                    })
+                    logger.error(f"❌ Failed to generate rent for {tenant.name}: {str(e)}")
 
             db.session.commit()
-            logger.info(f"💰 Generated {count} rent records for {month_start.strftime('%B %Y')}")
-            return count
+
+            logger.info(f"💰 Generated {generated} rent entries for {month_start.strftime('%B %Y')}")
+            logger.info(f"⏭️ Skipped {len(skipped)} tenants")
+            if errors:
+                logger.error(f"❌ {len(errors)} errors occurred")
+
+            return {
+                'generated': generated,
+                'month': month_start.strftime('%B %Y'),
+                'year': year,
+                'month_num': month,
+                'skipped': skipped,
+                'errors': errors
+            }
 
         except Exception as e:
             db.session.rollback()
-            logger.error(f"Failed to generate rent: {str(e)}")
-            raise
+            logger.error(f"Failed to generate monthly rent: {str(e)}")
+            return {
+                'generated': 0,
+                'error': str(e),
+                'month': 'N/A'
+            }
 
     @staticmethod
     def send_monthly_statements():
@@ -126,6 +176,7 @@ class SchedulerService:
         try:
             today = datetime.now().date()
             month_name = today.strftime('%B %Y')
+            month_start = today.replace(day=1)
 
             # Import SMSService
             from App.Services.SMSService import SMSService
@@ -143,19 +194,20 @@ class SchedulerService:
                 # Get rent for this month
                 rent_payment = Payment.query.filter(
                     Payment.tenant_id == tenant.id,
-                    Payment.payment_for_month == today.replace(day=1)
+                    Payment.payment_for_month == month_start,
+                    Payment.payment_type == 'rent'
                 ).first()
 
                 # Get water bill for this month
                 water_bill = WaterBill.query.filter(
                     WaterBill.tenant_id == tenant.id,
-                    WaterBill.month == today.replace(day=1)
+                    WaterBill.month == month_start
                 ).first()
 
                 # Get previous balance (unpaid from previous months)
                 previous_payments = Payment.query.filter(
                     Payment.tenant_id == tenant.id,
-                    Payment.payment_for_month < today.replace(day=1),
+                    Payment.payment_for_month < month_start,
                     Payment.status == 'pending'
                 ).all()
 
@@ -212,7 +264,6 @@ class SchedulerService:
     def _create_monthly_statement(tenant, month_name, rent_amount, water_amount, previous_balance, total_due,
                                   rent_payment, water_bill):
         """Create formatted monthly statement message"""
-        # Build the statement
         lines = []
         lines.append("🏠 RENT MANAGER - MONTHLY STATEMENT")
         lines.append("")
@@ -276,6 +327,11 @@ class SchedulerService:
             no_reading = []
 
             for tenant in tenants:
+                # Get property water rate and garbage fee
+                property_obj = Property.query.get(tenant.property_id)
+                water_rate = property_obj.water_rate if property_obj else 70.0
+                garbage_fee = property_obj.garbage_fee if property_obj else 300.0
+
                 # Get the latest reading for this tenant (from current month)
                 latest_reading = WaterReading.query.filter(
                     WaterReading.tenant_id == tenant.id,
@@ -291,20 +347,24 @@ class SchedulerService:
                     ).first()
 
                     if not existing_bill:
+                        # Calculate water charge using property's water rate
+                        water_charge = latest_reading.amount * water_rate if latest_reading.amount else 0
+
                         bill = WaterBill(
                             property_id=tenant.property_id,
                             tenant_id=tenant.id,
                             unit_id=tenant.unit_id,
                             month=month_start,
-                            water_charge=latest_reading.amount,
-                            garbage_charge=300,
-                            total=latest_reading.amount + 300,
+                            water_charge=water_charge,
+                            garbage_charge=garbage_fee,
+                            total=water_charge + garbage_fee,
                             status='pending',
                             created_at=datetime.utcnow()
                         )
                         db.session.add(bill)
                         latest_reading.status = 'billed'
                         count += 1
+                        logger.info(f"💧 Generated water bill for {tenant.name}: KSh {bill.total:,.2f}")
                 else:
                     no_reading.append({
                         'tenant': tenant.name,
@@ -314,11 +374,11 @@ class SchedulerService:
             db.session.commit()
             logger.info(f"💧 Generated {count} water bills for {month_start.strftime('%B %Y')}")
             if no_reading:
-                logger.info(f"⏭️ {len(no_reading)} tenants with no reading: {no_reading}")
+                logger.info(f"⏭️ {len(no_reading)} tenants with no reading")
             return {
                 'generated': count,
                 'no_reading': len(no_reading),
-                'details': no_reading[:10]  # Show first 10
+                'details': no_reading[:10]
             }
 
         except Exception as e:
@@ -339,7 +399,7 @@ class SchedulerService:
             # Check if it's after the 5th
             if today.day < 5:
                 logger.info("📋 Before 5th, no overdue checks needed")
-                return {'status': 'Before 5th', 'notified': 0}
+                return {'notified': 0, 'already_notified': 0, 'status': 'Before 5th'}
 
             # Get all pending payments for this month
             pending_payments = Payment.query.filter(
@@ -408,7 +468,7 @@ class SchedulerService:
 
         except Exception as e:
             logger.error(f"Failed to check overdue payments: {str(e)}")
-            raise
+            return {'notified': 0, 'already_notified': 0, 'error': str(e)}
 
     @staticmethod
     def _create_overdue_message(tenant, payment, days_overdue):
@@ -477,26 +537,26 @@ RentManager System"""
 
                     message = f"""📋 WATER READING REMINDER
 
-    Dear {caretaker.name},
+Dear {caretaker.name},
 
-    This is a reminder to take water meter readings for:
-    {' • ' + ' • '.join(property_names)}
+This is a reminder to take water meter readings for:
+{' • ' + ' • '.join(property_names)}
 
-    📅 Reading Period: 25th - 30th {month_name}
-    📋 Please record readings for all active tenants
+📅 Reading Period: 25th - 30th {month_name}
+📋 Please record readings for all active tenants
 
-    How to record:
-    1. Go to RentManager app
-    2. Navigate to Meter Readings
-    3. Click "New Reading" or use "Quick Entry"
-    4. Enter previous and current readings
-    5. Submit
+How to record:
+1. Go to RentManager app
+2. Navigate to Meter Readings
+3. Click "New Reading" or use "Quick Entry"
+4. Enter previous and current readings
+5. Submit
 
-    ⚠️ Please complete readings by 30th {month_name} for billing.
+⚠️ Please complete readings by 30th {month_name} for billing.
 
-    Thank you!
+Thank you!
 
-    RentManager System"""
+RentManager System"""
 
                     # Send SMS
                     try:
@@ -515,7 +575,7 @@ RentManager System"""
 
         except Exception as e:
             logger.error(f"Failed to send reading reminders: {str(e)}")
-            raise
+            return 0
 
     @staticmethod
     def generate_estimated_water_bills():
@@ -546,9 +606,14 @@ RentManager System"""
                 ).first()
 
                 if not existing_bill:
+                    # Get property water rate
+                    property_obj = Property.query.get(tenant.property_id)
+                    water_rate = property_obj.water_rate if property_obj else 70.0
+                    garbage_fee = property_obj.garbage_fee if property_obj else 300.0
+
                     # Use average consumption from previous months
                     avg_units = SchedulerService._calculate_average_consumption(tenant.id)
-                    estimated_amount = avg_units * 70  # Rate of 70 per unit
+                    estimated_amount = avg_units * water_rate
 
                     bill = WaterBill(
                         property_id=tenant.property_id,
@@ -556,8 +621,8 @@ RentManager System"""
                         unit_id=tenant.unit_id,
                         month=month_start,
                         water_charge=estimated_amount,
-                        garbage_charge=300,
-                        total=estimated_amount + 300,
+                        garbage_charge=garbage_fee,
+                        total=estimated_amount + garbage_fee,
                         status='pending',
                         notes=f"⚠️ ESTIMATED BILL - No reading submitted for {month_start.strftime('%B %Y')}",
                         created_at=datetime.utcnow()
@@ -573,16 +638,16 @@ RentManager System"""
             db.session.commit()
             logger.info(f"📊 Generated {count} estimated water bills")
             if estimated:
-                logger.info(f"📊 Estimated bills: {estimated[:5]}")  # Show first 5
+                logger.info(f"📊 Estimated bills: {estimated[:5]}")
             return {
                 'generated': count,
-                'estimated': estimated[:10]  # Show first 10
+                'estimated': estimated[:10]
             }
 
         except Exception as e:
             db.session.rollback()
             logger.error(f"Failed to generate estimated bills: {str(e)}")
-            raise
+            return {'generated': 0, 'estimated': [], 'error': str(e)}
 
     @staticmethod
     def _calculate_average_consumption(tenant_id):

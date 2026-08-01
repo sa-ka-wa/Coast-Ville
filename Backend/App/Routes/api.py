@@ -6,10 +6,14 @@ from App.Controllers.PropertyController import PropertyController
 from App.Controllers.UnitController import UnitController
 from App.Controllers.WaterController import WaterController
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ✅ ADD THESE IMPORTS FOR MONTHLY STATEMENTS
 from App.Models.TenantModel import Tenant
 from App.Models.PaymentModel import Payment
+from App.Extension import db
 
 api_bp = Blueprint('api', __name__)
 
@@ -643,3 +647,427 @@ def get_monthly_payment_summary():
 
     summary = Payment.get_monthly_summary(tenant_id, year, month)
     return jsonify(summary), 200
+
+
+# App/Routes/api.py - Add this endpoint
+# App/Routes/api.py - Add this endpoint
+
+@api_bp.route('/billing/close-month', methods=['POST'])
+@jwt_required()
+def close_month():
+    """Close the current month and start the next month"""
+    try:
+        data = request.json
+        year = data.get('year')
+        month = data.get('month')
+
+        from datetime import datetime, timedelta
+        from App.Models.TenantModel import Tenant
+        from App.Models.PaymentModel import Payment
+        from App.Models.WaterReadingModel import WaterBill
+
+        # Get all active tenants
+        tenants = Tenant.query.filter_by(status='active').all()
+
+        # Process each tenant
+        results = []
+        for tenant in tenants:
+            # Calculate outstanding balance
+            payments = Payment.query.filter_by(tenant_id=tenant.id, status='paid').all()
+            bills = WaterBill.query.filter_by(tenant_id=tenant.id).all()
+
+            total_paid = sum([p.amount for p in payments])
+            total_billed = sum([b.total for b in bills])
+            balance = total_billed - total_paid
+
+            # Update tenant balance
+            tenant.balance = (tenant.balance or 0) + balance
+
+            results.append({
+                'tenant_id': tenant.id,
+                'name': tenant.name,
+                'balance': tenant.balance
+            })
+
+        db.session.commit()
+
+        return jsonify({
+            'message': f'Month {month}/{year} closed successfully',
+            'tenants_updated': len(results),
+            'results': results
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error closing month: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================
+# SCHEDULER ROUTES - FIXED (MOVED OUTSIDE close_month)
+# ============================================================
+
+@api_bp.route('/scheduler/generate-rent', methods=['POST'])
+@jwt_required()
+def generate_rent():
+    """Generate rent for a specific month (manual trigger)"""
+    try:
+        data = request.json
+        year = data.get('year', datetime.now().year)
+        month = data.get('month', datetime.now().month)
+
+        from App.Services.SchedulerService import SchedulerService
+        result = SchedulerService.generate_monthly_rent(year, month)
+
+        if result.get('error'):
+            return jsonify({'error': result['error']}), 500
+
+        return jsonify({
+            'message': result.get('message', 'Rent generated successfully'),
+            'generated': result.get('generated', 0),
+            'month': f'{month}/{year}',
+            'skipped': result.get('skipped', []),
+            'errors': result.get('errors', [])
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error generating rent: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/scheduler/generate-water-bills', methods=['POST'])
+@jwt_required()
+def generate_water_bills():
+    """Generate water bills for a specific month (manual trigger)"""
+    try:
+        data = request.json
+        year = data.get('year', datetime.now().year)
+        month = data.get('month', datetime.now().month)
+        property_id = data.get('property_id')
+
+        from App.Services.SchedulerService import SchedulerService
+        result = SchedulerService.generate_monthly_water_bills()
+
+        if result.get('error'):
+            return jsonify({'error': result['error']}), 500
+
+        return jsonify({
+            'message': 'Water bills generated successfully',
+            'generated': result.get('generated', 0),
+            'no_reading': result.get('no_reading', 0)
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error generating water bills: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================
+# WATER BILLS MANUAL TRIGGER (Alternative endpoint)
+# ============================================================
+
+@api_bp.route('/scheduler/generate-water-bills-manual', methods=['POST'])
+@jwt_required()
+def generate_water_bills_manual():
+    """Generate water bills for a specific month (manual trigger)"""
+    try:
+        data = request.json
+        year = data.get('year', datetime.now().year)
+        month = data.get('month', datetime.now().month)
+        property_id = data.get('property_id')
+
+        from App.Services.SchedulerService import SchedulerService
+
+        # Override the default behavior to use the provided property_id
+        result = SchedulerService.generate_monthly_water_bills()
+
+        return jsonify({
+            'message': 'Water bills generated successfully',
+            'generated': result.get('generated', 0),
+            'no_reading': result.get('no_reading', 0),
+            'details': result.get('details', [])
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error generating water bills: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+    # App/Routes/api.py - Add these endpoints after the existing billing routes
+
+    # ============================================================
+    # TENANT-SPECIFIC BILLING ROUTES
+    # ============================================================
+
+@api_bp.route('/billing/close-tenant-month', methods=['POST'])
+@jwt_required()
+def close_tenant_month():
+        """Close the current month for a specific tenant"""
+        try:
+            data = request.json
+            tenant_id = data.get('tenant_id')
+            year = data.get('year')
+            month = data.get('month')
+            carry_forward = data.get('carry_forward_balance', True)
+            notes = data.get('notes')
+
+            if not tenant_id or not year or not month:
+                return jsonify({'error': 'tenant_id, year, and month are required'}), 400
+
+            from datetime import datetime, timedelta
+            from App.Models.TenantModel import Tenant
+            from App.Models.PaymentModel import Payment
+            from App.Models.WaterReadingModel import WaterBill
+
+            tenant = Tenant.query.get(tenant_id)
+            if not tenant:
+                return jsonify({'error': 'Tenant not found'}), 404
+
+            current_month_start = datetime(year, month, 1).date()
+            next_month_start = current_month_start + timedelta(days=32)
+            next_month_start = next_month_start.replace(day=1)
+
+            # Get payments and bills for the current month
+            payments = Payment.query.filter(
+                Payment.tenant_id == tenant_id,
+                Payment.payment_for_month == current_month_start,
+                Payment.status == 'paid'
+            ).all()
+
+            bills = WaterBill.query.filter(
+                WaterBill.tenant_id == tenant_id,
+                WaterBill.month == current_month_start
+            ).all()
+
+            total_paid = sum([p.amount for p in payments])
+            total_billed = sum([b.total for b in bills])
+            monthly_balance = total_billed - total_paid
+
+            if carry_forward:
+                tenant.balance = (tenant.balance or 0) + monthly_balance
+            else:
+                # If not carrying forward, reset balance to 0
+                tenant.balance = 0
+
+            # Add note about closure
+            if notes:
+                tenant.notes = f"{tenant.notes or ''}\n{notes}".strip()
+
+            db.session.commit()
+
+            logger.info(f"✅ Month {month}/{year} closed for {tenant.name} (Balance: {tenant.balance})")
+
+            return jsonify({
+                'message': f'Month {month}/{year} closed for {tenant.name}',
+                'tenant_id': tenant_id,
+                'tenant_name': tenant.name,
+                'monthly_balance': monthly_balance,
+                'new_balance': tenant.balance,
+                'carry_forward': carry_forward,
+                'next_month': {
+                    'year': next_month_start.year,
+                    'month': next_month_start.month,
+                    'month_name': next_month_start.strftime('%B %Y')
+                }
+            }), 200
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error closing tenant month: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/scheduler/generate-tenant-rent', methods=['POST'])
+@jwt_required()
+def generate_tenant_rent():
+        """Generate rent for a specific tenant for a specific month"""
+        try:
+            data = request.json
+            tenant_id = data.get('tenant_id')
+            year = data.get('year')
+            month = data.get('month')
+
+            if not tenant_id or not year or not month:
+                return jsonify({'error': 'tenant_id, year, and month are required'}), 400
+
+            from datetime import datetime
+            from App.Models.TenantModel import Tenant
+            from App.Models.PaymentModel import Payment
+
+            tenant = Tenant.query.get(tenant_id)
+            if not tenant:
+                return jsonify({'error': 'Tenant not found'}), 404
+
+            month_start = datetime(year, month, 1).date()
+
+            # Check if rent already exists
+            existing = Payment.query.filter(
+                Payment.tenant_id == tenant_id,
+                Payment.payment_for_month == month_start,
+                Payment.payment_type == 'rent'
+            ).first()
+
+            if existing:
+                return jsonify({
+                    'message': f'Rent already exists for {tenant.name}',
+                    'amount': existing.amount,
+                    'status': existing.status,
+                    'payment_id': existing.id
+                }), 200
+
+            # Create rent payment
+            payment = Payment(
+                property_id=tenant.property_id,
+                tenant_id=tenant.id,
+                unit_id=tenant.unit_id,
+                amount=tenant.monthly_rent or 0,
+                receipt_no=f"RENT-{month_start.strftime('%Y%m')}-{tenant.id}",
+                payment_date=datetime.utcnow(),
+                payment_method='pending',
+                status='pending',
+                payment_type='rent',
+                payment_for_month=month_start,
+                notes=f'Rent for {month_start.strftime("%B %Y")} - Auto-generated for {tenant.name}'
+            )
+
+            db.session.add(payment)
+            db.session.commit()
+
+            logger.info(
+                f"💰 Generated rent for {tenant.name}: KSh {payment.amount:,.2f} for {month_start.strftime('%B %Y')}")
+
+            return jsonify({
+                'message': f'Rent generated for {tenant.name}',
+                'tenant_id': tenant_id,
+                'tenant_name': tenant.name,
+                'amount': payment.amount,
+                'month': month_start.strftime('%B %Y'),
+                'payment_id': payment.id,
+                'status': payment.status
+            }), 201
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error generating tenant rent: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/billing/tenant-balance/<int:tenant_id>', methods=['GET'])
+@jwt_required()
+def get_tenant_balance(tenant_id):
+        """Get the current balance for a specific tenant"""
+        try:
+            from App.Models.TenantModel import Tenant
+            from App.Models.PaymentModel import Payment
+            from App.Models.WaterReadingModel import WaterBill
+
+            tenant = Tenant.query.get(tenant_id)
+            if not tenant:
+                return jsonify({'error': 'Tenant not found'}), 404
+
+            # Get all payments and bills
+            payments = Payment.query.filter(
+                Payment.tenant_id == tenant_id,
+                Payment.status == 'paid'
+            ).all()
+
+            bills = WaterBill.query.filter(
+                WaterBill.tenant_id == tenant_id
+            ).all()
+
+            total_paid = sum([p.amount for p in payments])
+            total_billed = sum([b.total for b in bills])
+
+            balance = total_billed - total_paid
+
+            return jsonify({
+                'tenant_id': tenant_id,
+                'tenant_name': tenant.name,
+                'house_no': tenant.unit.unit_number if tenant.unit else 'N/A',
+                'monthly_rent': tenant.monthly_rent or 0,
+                'balance': tenant.balance or 0,
+                'calculated_balance': balance,
+                'total_paid': total_paid,
+                'total_billed': total_billed
+            }), 200
+
+        except Exception as e:
+            logger.error(f"Error getting tenant balance: {str(e)}")
+            return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/billing/tenant-payments/<int:tenant_id>', methods=['POST'])
+@jwt_required()
+def add_tenant_payment():
+        """Add a manual payment for a specific tenant"""
+        try:
+            data = request.json
+            tenant_id = data.get('tenant_id')
+            amount = data.get('amount')
+            payment_method = data.get('payment_method', 'cash')
+            payment_for_month = data.get('payment_for_month')
+            notes = data.get('notes')
+            rent_amount = data.get('rent_amount', amount)
+            water_amount = data.get('water_amount', 0)
+
+            if not tenant_id or not amount:
+                return jsonify({'error': 'tenant_id and amount are required'}), 400
+
+            from datetime import datetime
+            from App.Models.TenantModel import Tenant
+            from App.Models.PaymentModel import Payment
+            import uuid
+
+            tenant = Tenant.query.get(tenant_id)
+            if not tenant:
+                return jsonify({'error': 'Tenant not found'}), 404
+
+            # Parse payment month
+            if payment_for_month:
+                try:
+                    payment_month = datetime.strptime(payment_for_month, '%Y-%m-%d').date()
+                except ValueError:
+                    payment_month = datetime.now().date()
+            else:
+                payment_month = datetime.now().date()
+
+            # Generate receipt number
+            receipt_no = f"MAN-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+
+            payment = Payment(
+                property_id=tenant.property_id,
+                tenant_id=tenant.id,
+                unit_id=tenant.unit_id,
+                amount=amount,
+                receipt_no=receipt_no,
+                payment_date=datetime.utcnow(),
+                payment_method=payment_method,
+                status='paid',
+                payment_type='rent',
+                payment_for_month=payment_month,
+                rent_amount=rent_amount,
+                water_amount=water_amount,
+                notes=notes or f'Manual payment for {tenant.name}'
+            )
+
+            db.session.add(payment)
+
+            # Update tenant balance
+            tenant.balance = (tenant.balance or 0) - amount
+
+            db.session.commit()
+
+            logger.info(f"💰 Manual payment added for {tenant.name}: KSh {amount:,.2f}")
+
+            return jsonify({
+                'message': f'Payment added for {tenant.name}',
+                'payment': payment.to_dict(),
+                'tenant_balance': tenant.balance
+            }), 201
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error adding tenant payment: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': str(e)}), 500

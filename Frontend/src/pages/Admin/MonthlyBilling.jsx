@@ -53,6 +53,8 @@ import {
   UserDeleteOutlined,
   PercentageOutlined,
   WalletOutlined,
+  InfoCircleOutlined,
+  EyeOutlined,
 } from "@ant-design/icons";
 import { useProperty } from "../../context/PropertyContext";
 import { getTenants } from "../../services/tenants";
@@ -62,6 +64,7 @@ import { formatCurrency, formatDate } from "../../utils/formatters";
 import dayjs from "dayjs";
 import isBetween from "dayjs/plugin/isBetween";
 import api from "../../services/api";
+import { useNavigate } from "react-router-dom";
 
 dayjs.extend(isBetween);
 
@@ -69,6 +72,7 @@ const { Title, Text } = Typography;
 const { Option } = Select;
 
 const MonthlyBillingContent = () => {
+  const navigate = useNavigate();
   const { message: appMessage, modal: appModal } = App.useApp();
   const { activeProperty } = useProperty();
   const [loading, setLoading] = useState(false);
@@ -95,7 +99,7 @@ const MonthlyBillingContent = () => {
   const [closeTenantForm] = Form.useForm();
   const [closingTenant, setClosingTenant] = useState(false);
 
-  // ✅ New state for adding rent to specific tenant
+  // State for adding rent to specific tenant
   const [addRentModalVisible, setAddRentModalVisible] = useState(false);
   const [selectedTenantForRent, setSelectedTenantForRent] = useState(null);
   const [rentForm] = Form.useForm();
@@ -114,11 +118,57 @@ const MonthlyBillingContent = () => {
 
   const currentPropertyId = activeProperty?.id;
 
+  // Check if month closing is allowed (25th to 5th)
+  const isMonthClosingAllowed = () => {
+    const today = dayjs();
+    const day = today.date();
+    return day >= 25 || day <= 5;
+  };
+
+  // Get closing period message
+  const getClosingPeriodMessage = () => {
+    const today = dayjs();
+    const day = today.date();
+    if (day >= 25 && day <= 31) {
+      return `📅 You are in the closing period (${today.format("DD MMM")} - ${today.endOf("month").format("DD MMM")})`;
+    } else if (day >= 1 && day <= 5) {
+      return `📅 You are in the closing period (${today.startOf("month").format("DD MMM")} - ${today.format("DD MMM")})`;
+    } else {
+      return `⏰ Month closing is only allowed between 25th - 5th. Current date: ${today.format("DD MMM YYYY")}`;
+    }
+  };
+
+  // Get next closing date
+  const getNextClosingDate = () => {
+    const today = dayjs();
+    const day = today.date();
+    if (day < 25) {
+      return today.date(25).format("DD MMM YYYY");
+    } else if (day > 5 && day < 25) {
+      return today.add(1, "month").date(25).format("DD MMM YYYY");
+    }
+    return null;
+  };
+
   useEffect(() => {
     if (currentPropertyId) {
       fetchData();
     }
   }, [currentPropertyId, billingMonth]);
+
+  // ✅ Handle click on "No Reading" - Navigate to water readings
+  const handleNoReadingClick = (tenant) => {
+    navigate(
+      `/admin/water?tenant_id=${tenant.id}&property_id=${currentPropertyId}`,
+    );
+  };
+
+  // ✅ Handle click on "Pending" - Navigate to water readings
+  const handlePendingClick = (tenant) => {
+    navigate(
+      `/admin/water?tenant_id=${tenant.id}&property_id=${currentPropertyId}`,
+    );
+  };
 
   const fetchData = async () => {
     if (!currentPropertyId) {
@@ -135,6 +185,7 @@ const MonthlyBillingContent = () => {
       const year = billingMonth.year();
       const month = billingMonth.month() + 1;
 
+      // ✅ Fetch water readings for the current month
       const readingsRes = await getWaterReadings({
         property_id: currentPropertyId,
         start_date: billingMonth.startOf("month").format("YYYY-MM-DD"),
@@ -142,11 +193,13 @@ const MonthlyBillingContent = () => {
       });
       const readings = readingsRes.data || [];
 
+      // ✅ Fetch water bills for the property
       const billsRes = await getWaterBills({
         property_id: currentPropertyId,
       });
       const billsList = billsRes.data || [];
 
+      // ✅ Fetch payments
       const paymentsRes = await getPayments({
         property_id: currentPropertyId,
       });
@@ -155,6 +208,7 @@ const MonthlyBillingContent = () => {
       const monthStart = billingMonth.startOf("month");
       const monthEnd = billingMonth.endOf("month");
 
+      // Filter payments for the current month
       const payments = allPayments.filter((p) => {
         const paymentDate = p.payment_date ? dayjs(p.payment_date) : null;
         if (!paymentDate) return false;
@@ -163,10 +217,13 @@ const MonthlyBillingContent = () => {
 
       const billingData = tenantsList.map((tenant) => {
         const tenantId = tenant.id;
+
+        // ✅ Get readings for this tenant in the current month
         const tenantReadings = readings.filter(
           (r) => (r.tenantId || r.tenant_id) === tenantId,
         );
 
+        // ✅ Get bills for this tenant
         const tenantBills = billsList.filter((b) => {
           const bTenantId = b.tenantId || b.tenant_id;
           if (bTenantId !== tenantId) return false;
@@ -178,30 +235,49 @@ const MonthlyBillingContent = () => {
           );
         });
 
+        // ✅ Get payments for this tenant in the current month
         const tenantPayments = payments.filter((p) => {
           const pTenantId = p.tenantId || p.tenant_id;
           return pTenantId === tenantId;
         });
 
+        // ✅ Calculate water due from bills
         const totalWater = tenantBills.reduce(
           (sum, b) => sum + (b.total || b.waterCharge || 0),
           0,
         );
+
+        // ✅ Calculate total paid
         const totalPaid = tenantPayments.reduce(
           (sum, p) => sum + (p.amount || 0),
           0,
         );
+
+        // ✅ Get rent due
         const rentDue = tenant.monthly_rent || 0;
 
+        // ✅ Determine water reading status
+        const hasReading = tenantReadings.length > 0;
         const hasPendingReading = tenantReadings.some(
           (r) => r.status === "pending",
         );
-        const hasReading = tenantReadings.length > 0;
-        const waterStatus = hasReading
-          ? hasPendingReading
-            ? "pending"
-            : "read"
-          : "no_reading";
+        const hasBilledReading = tenantReadings.some(
+          (r) => r.status === "billed",
+        );
+
+        let waterStatus = "no_reading";
+        if (hasReading && hasPendingReading) {
+          waterStatus = "pending";
+        } else if (hasReading && hasBilledReading) {
+          waterStatus = "billed";
+        } else if (hasReading) {
+          waterStatus = "has_reading";
+        } else {
+          waterStatus = "no_reading";
+        }
+
+        // ✅ Check if there's a bill
+        const hasBill = tenantBills.length > 0;
 
         return {
           ...tenant,
@@ -215,7 +291,8 @@ const MonthlyBillingContent = () => {
           balance: totalWater + rentDue - totalPaid,
           water_status: waterStatus,
           has_reading: hasReading,
-          has_bill: tenantBills.length > 0,
+          has_bill: hasBill,
+          reading_count: tenantReadings.length,
           status:
             totalPaid >= totalWater + rentDue
               ? "paid"
@@ -225,6 +302,7 @@ const MonthlyBillingContent = () => {
         };
       });
 
+      // Sort by status (unpaid first)
       const sortedData = billingData.sort((a, b) => {
         const statusOrder = { unpaid: 0, partial: 1, paid: 2 };
         return statusOrder[a.status] - statusOrder[b.status];
@@ -232,6 +310,7 @@ const MonthlyBillingContent = () => {
 
       setBills(sortedData);
 
+      // Calculate stats
       const totalTenants = sortedData.length;
       const totalBilled = sortedData.reduce((sum, t) => sum + t.total_due, 0);
       const totalPaidAmount = sortedData.reduce(
@@ -257,7 +336,7 @@ const MonthlyBillingContent = () => {
     }
   };
 
-  // ✅ Handle adding rent for specific tenant
+  // Handle adding rent for specific tenant
   const handleAddRent = () => {
     setAddRentModalVisible(true);
     rentForm.resetFields();
@@ -266,7 +345,7 @@ const MonthlyBillingContent = () => {
     setProrationDetails(null);
   };
 
-  // ✅ Calculate prorated rent based on move-in date
+  // Calculate prorated rent based on move-in date
   const calculateProratedRent = (tenantId, moveInDate, rentAmount) => {
     if (!moveInDate || !rentAmount) return { amount: 0, details: null };
 
@@ -293,7 +372,7 @@ const MonthlyBillingContent = () => {
     return { amount: rentAmount, details: null };
   };
 
-  // ✅ Handle rent form changes for calculation
+  // Handle rent form changes for calculation
   const handleRentFormChange = (changedValues, allValues) => {
     const { tenant_id, move_in_date, custom_rent, rent_type } = allValues;
 
@@ -302,7 +381,6 @@ const MonthlyBillingContent = () => {
       if (tenant) {
         let baseRent = custom_rent || tenant.monthly_rent || 0;
 
-        // Calculate prorated rent if move-in date is provided
         if (move_in_date && rent_type === "prorated") {
           const result = calculateProratedRent(
             tenant_id,
@@ -319,7 +397,7 @@ const MonthlyBillingContent = () => {
     }
   };
 
-  // ✅ Submit adding rent for specific tenant
+  // Submit adding rent for specific tenant
   const handleAddRentSubmit = async (values) => {
     setAddingRent(true);
     try {
@@ -341,7 +419,6 @@ const MonthlyBillingContent = () => {
         return;
       }
 
-      // Calculate final rent amount
       let finalRentAmount =
         rent_amount || custom_rent || tenant.monthly_rent || 0;
 
@@ -359,7 +436,7 @@ const MonthlyBillingContent = () => {
         tenant_id: tenant_id,
         unit_id: tenant.unit_id,
         amount: finalRentAmount + (water_amount || 0),
-        payment_method: payment_method || "system",
+        payment_method: payment_method || "cash",
         status: payment_status || "pending",
         payment_type: "rent",
         payment_for_month: billingMonth.startOf("month").format("YYYY-MM-DD"),
@@ -392,7 +469,7 @@ const MonthlyBillingContent = () => {
     }
   };
 
-  // ✅ Handle tenant selection in rent form
+  // Handle tenant selection in rent form
   const handleRentTenantSelect = (tenantId) => {
     const tenant = tenants.find((t) => t.id === tenantId);
     if (tenant) {
@@ -454,7 +531,7 @@ const MonthlyBillingContent = () => {
         tenant_id: tenant_id,
         unit_id: tenant.unit_id,
         amount: finalRentAmount + (water_amount || 0),
-        payment_method: "system",
+        payment_method: "cash",
         status: "pending",
         payment_type: "rent",
         payment_for_month: billingMonth.startOf("month").format("YYYY-MM-DD"),
@@ -625,7 +702,42 @@ const MonthlyBillingContent = () => {
     }
   };
 
+  // Calendar-sensitive month closing
   const handleCloseMonth = () => {
+    // Check if month closing is allowed
+    if (!isMonthClosingAllowed()) {
+      const nextDate = getNextClosingDate();
+      appModal.warning({
+        title: "Month Closing Not Allowed",
+        content: (
+          <div>
+            <p>
+              <InfoCircleOutlined
+                style={{ color: "#faad14", marginRight: 8 }}
+              />
+              <strong>
+                Month closing is only allowed between the 25th and 5th of each
+                month.
+              </strong>
+            </p>
+            <p style={{ marginTop: 12 }}>
+              Current date: <strong>{dayjs().format("DD MMM YYYY")}</strong>
+            </p>
+            {nextDate && (
+              <p>
+                Next closing period starts on: <strong>{nextDate}</strong>
+              </p>
+            )}
+            <p style={{ marginTop: 12, color: "#8c8c8c" }}>
+              This ensures proper month-end reconciliation and rent generation.
+            </p>
+          </div>
+        ),
+        okText: "Got it",
+      });
+      return;
+    }
+
     appModal.confirm({
       title: "Close Month & Move to Next",
       content: (
@@ -641,6 +753,10 @@ const MonthlyBillingContent = () => {
           </p>
           <p style={{ color: "#52c41a" }}>
             ✅ Rent for the next month will be automatically generated.
+          </p>
+          <p style={{ color: "#1890ff" }}>
+            📅 You are in the closing window (25th - 5th). This is the
+            recommended time to close the month.
           </p>
           <p>Make sure all bills have been generated and sent.</p>
         </div>
@@ -800,35 +916,71 @@ const MonthlyBillingContent = () => {
     }
   };
 
+  // ✅ Get water status display and click handler
+  const getWaterStatusDisplay = (record) => {
+    const { water_status, id } = record;
+
+    if (water_status === "no_reading") {
+      return {
+        tag: (
+          <Tag
+            color="orange"
+            style={{ cursor: "pointer" }}
+            onClick={() => handleNoReadingClick(record)}
+          >
+            ⏳ No Reading
+          </Tag>
+        ),
+        clickable: true,
+      };
+    } else if (water_status === "pending") {
+      return {
+        tag: (
+          <Tag
+            color="gold"
+            style={{ cursor: "pointer" }}
+            onClick={() => handlePendingClick(record)}
+          >
+            ⏳ Pending
+          </Tag>
+        ),
+        clickable: true,
+      };
+    } else if (water_status === "billed" || water_status === "has_reading") {
+      return {
+        tag: <Tag color="green">✅ Read</Tag>,
+        clickable: false,
+      };
+    }
+    return {
+      tag: <Tag color="default">Unknown</Tag>,
+      clickable: false,
+    };
+  };
+
   const columns = [
     {
       title: "Tenant",
       key: "tenant",
-      width: 180,
+      width: 200,
       render: (_, record) => (
         <div>
           <div style={{ fontWeight: 500 }}>{record.name}</div>
           <div style={{ fontSize: 12, color: "#8c8c8c" }}>
             House {record.houseNo || record.unit_number || "N/A"} •{" "}
             {record.phone || "No phone"}
-            {record.water_status === "no_reading" && (
-              <Tag color="orange" style={{ marginLeft: 8 }}>
-                ⏳ No Reading
-              </Tag>
-            )}
-            {record.water_status === "pending" && (
-              <Tag color="gold" style={{ marginLeft: 8 }}>
-                ⏳ Pending
-              </Tag>
-            )}
-            {!record.has_bill && record.status !== "paid" && (
-              <Tag color="red" style={{ marginLeft: 8 }}>
-                No Bill
-              </Tag>
-            )}
           </div>
         </div>
       ),
+    },
+    {
+      title: "Water Status",
+      key: "water_status",
+      width: 140,
+      render: (_, record) => {
+        const { tag } = getWaterStatusDisplay(record);
+        return tag;
+      },
     },
     {
       title: "Rent Due",
@@ -844,17 +996,15 @@ const MonthlyBillingContent = () => {
       dataIndex: "water_due",
       key: "water_due",
       align: "right",
-      render: (val, record) => (
-        <span style={{ fontWeight: 500 }}>
-          {record.water_status === "no_reading" ? (
-            <Tag color="orange">⏳ No Reading</Tag>
-          ) : record.water_status === "pending" ? (
-            <Tag color="gold">⏳ Pending</Tag>
-          ) : (
-            formatCurrency(val)
-          )}
-        </span>
-      ),
+      render: (val, record) => {
+        if (record.water_status === "no_reading") {
+          return <Tag color="orange">⏳ No Reading</Tag>;
+        } else if (record.water_status === "pending") {
+          return <Tag color="gold">⏳ Pending</Tag>;
+        } else {
+          return <span style={{ fontWeight: 500 }}>{formatCurrency(val)}</span>;
+        }
+      },
     },
     {
       title: "Total Due",
@@ -909,7 +1059,7 @@ const MonthlyBillingContent = () => {
     {
       title: "Actions",
       key: "actions",
-      width: 120,
+      width: 140,
       render: (_, record) => (
         <Space>
           <Tooltip title="View Details">
@@ -927,6 +1077,19 @@ const MonthlyBillingContent = () => {
               onClick={() => handleSendReceipt(record)}
             />
           </Tooltip>
+          {(record.water_status === "no_reading" ||
+            record.water_status === "pending") && (
+            <Tooltip title="Add Water Reading">
+              <Button
+                size="small"
+                icon={<EyeOutlined />}
+                style={{ color: "#1890ff" }}
+                onClick={() => handleNoReadingClick(record)}
+              >
+                Add Reading
+              </Button>
+            </Tooltip>
+          )}
         </Space>
       ),
     },
@@ -1083,7 +1246,6 @@ const MonthlyBillingContent = () => {
           >
             Generate Rent
           </Button>
-          {/* ✅ NEW: Add Rent for Tenant Button */}
           <Button
             icon={<WalletOutlined />}
             onClick={handleAddRent}
@@ -1124,15 +1286,26 @@ const MonthlyBillingContent = () => {
           >
             Export Report
           </Button>
-          <Button
-            danger
-            icon={<ForwardOutlined />}
-            onClick={handleCloseMonth}
-            loading={closingMonth}
-            size="large"
-          >
-            Close Month & Move to Next
-          </Button>
+          <Tooltip title={getClosingPeriodMessage()}>
+            <Button
+              danger
+              icon={<ForwardOutlined />}
+              onClick={handleCloseMonth}
+              loading={closingMonth}
+              size="large"
+              style={{
+                opacity: isMonthClosingAllowed() ? 1 : 0.6,
+                borderColor: isMonthClosingAllowed() ? undefined : "#ff4d4f",
+              }}
+            >
+              Close Month & Move to Next
+              {!isMonthClosingAllowed() && (
+                <Tag color="orange" style={{ marginLeft: 8 }}>
+                  ⏰ Restricted
+                </Tag>
+              )}
+            </Button>
+          </Tooltip>
         </Space>
         <Divider type="vertical" style={{ height: 40 }} />
         <Space>
@@ -1140,6 +1313,9 @@ const MonthlyBillingContent = () => {
           <Badge color="orange" text="Partial" />
           <Badge color="red" text="Unpaid" />
           <Badge color="gold" text="Pending Reading" />
+          {!isMonthClosingAllowed() && (
+            <Badge color="orange" text="⏰ Month Closing Restricted" />
+          )}
         </Space>
       </Card>
 
@@ -1155,7 +1331,7 @@ const MonthlyBillingContent = () => {
             showSizeChanger: true,
             showTotal: (total) => `Total ${total} tenants`,
           }}
-          scroll={{ x: 1000 }}
+          scroll={{ x: 1200 }}
           locale={{
             emptyText: (
               <Empty
@@ -1355,7 +1531,13 @@ const MonthlyBillingContent = () => {
                   <span>
                     No readings for this month
                     <br />
-                    <Tag color="orange">⏳ No Reading Recorded</Tag>
+                    <Tag
+                      color="orange"
+                      style={{ cursor: "pointer" }}
+                      onClick={() => handleNoReadingClick(selectedTenant)}
+                    >
+                      ⏳ Click here to add reading
+                    </Tag>
                   </span>
                 }
               />
@@ -1364,7 +1546,7 @@ const MonthlyBillingContent = () => {
         )}
       </Modal>
 
-      {/* ✅ NEW: Add Rent for Tenant Modal */}
+      {/* Add Rent for Tenant Modal */}
       <Modal
         title={
           <Space>
@@ -1410,7 +1592,7 @@ const MonthlyBillingContent = () => {
             water_amount: 0,
             rent_type: "full",
             payment_status: "pending",
-            payment_method: "system",
+            payment_method: "cash",
           }}
         >
           <Form.Item
