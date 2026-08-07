@@ -4,10 +4,8 @@ import requests
 import base64
 from datetime import datetime
 import json
-from flask import current_app
 import logging
 
-# Add this logger configuration
 logger = logging.getLogger(__name__)
 
 
@@ -26,7 +24,7 @@ class MpesaService:
                                             'https://rentmanager-backend.onrender.com/api/mpesa/callback')
         self.mpesa_consumer_key = os.getenv('MPESA_CONSUMER_KEY', '')
         self.mpesa_consumer_secret = os.getenv('MPESA_CONSUMER_SECRET', '')
-        self.env = os.getenv('MPESA_ENV', 'sandbox')  # sandbox or production
+        self.env = os.getenv('MPESA_ENV', 'sandbox')
 
         # Set base URL based on environment
         if self.env == 'sandbox':
@@ -34,7 +32,6 @@ class MpesaService:
         else:
             self.base_url = 'https://api.safaricom.co.ke'
 
-        # Log configuration (without exposing secrets)
         print(f"M-Pesa Configuration:")
         print(f"  Environment: {self.env}")
         print(f"  Shortcode: {self.mpesa_shortcode}")
@@ -53,16 +50,11 @@ class MpesaService:
                 return {'success': False, 'error': 'M-Pesa credentials not configured'}
 
             url = f"{self.base_url}/oauth/v1/generate?grant_type=client_credentials"
-            logger.info(f"🌐 Token URL: {url}")
-            logger.info(f"🔑 Consumer Key: {self.mpesa_consumer_key[:20]}...")
-
             response = requests.get(
                 url,
                 auth=(self.mpesa_consumer_key, self.mpesa_consumer_secret),
                 timeout=30
             )
-
-            logger.info(f"📥 Token response status: {response.status_code}")
 
             if response.status_code == 200:
                 data = response.json()
@@ -88,31 +80,21 @@ class MpesaService:
         try:
             logger.info(f"🔧 STK Push called with: phone={phone_number}, amount={amount}")
 
-            # Validate configuration
             if not self.mpesa_consumer_key or not self.mpesa_consumer_secret:
                 logger.error("❌ M-Pesa credentials not configured")
                 return {'success': False, 'error': 'M-Pesa credentials not configured'}
 
-            # Get access token
-            logger.info("🔑 Getting access token...")
             token_result = self.get_access_token()
-
             if not token_result.get('success'):
                 return {'success': False, 'error': token_result.get('error', 'Failed to get access token')}
 
             access_token = token_result.get('token')
-            logger.info(f"✅ Access token obtained: {access_token[:30]}...")
-
-            # Format phone number
             phone_number = self.format_phone_number(phone_number)
-            logger.info(f"📱 Formatted phone: {phone_number}")
 
             timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
             password = base64.b64encode(f"{self.mpesa_shortcode}{self.mpesa_passkey}{timestamp}".encode()).decode()
 
             url = f"{self.base_url}/mpesa/stkpush/v1/processrequest"
-            logger.info(f"🌐 URL: {url}")
-
             headers = {
                 'Authorization': f'Bearer {access_token}',
                 'Content-Type': 'application/json'
@@ -132,17 +114,10 @@ class MpesaService:
                 'TransactionDesc': transaction_desc[:20] if transaction_desc else 'Rent Payment'
             }
 
-            logger.info(f"📤 Sending STK Push request...")
-
             response = requests.post(url, json=payload, headers=headers, timeout=30)
-
-            logger.info(f"📥 Response status: {response.status_code}")
-            logger.info(f"📥 Response body: {response.text[:500]}")
 
             if response.status_code == 200:
                 response_data = response.json()
-                logger.info(f"✅ STK Push response: {response_data}")
-
                 if response_data.get('ResponseCode') == '0':
                     return {
                         'success': True,
@@ -152,12 +127,9 @@ class MpesaService:
                         'ResponseDescription': response_data.get('ResponseDescription')
                     }
                 else:
-                    error_msg = response_data.get('errorMessage') or response_data.get(
-                        'ResponseDescription') or 'STK Push failed'
-                    logger.error(f"❌ STK Push failed: {error_msg}")
+                    error_msg = response_data.get('errorMessage') or response_data.get('ResponseDescription') or 'STK Push failed'
                     return {'success': False, 'error': error_msg}
             else:
-                logger.error(f"❌ HTTP Error: {response.status_code}")
                 return {'success': False, 'error': f"HTTP {response.status_code}: {response.text}"}
 
         except Exception as e:
@@ -168,19 +140,11 @@ class MpesaService:
 
     def format_phone_number(self, phone_number):
         """Format phone number to international format"""
-        # Remove any non-digit characters
         phone_number = ''.join(filter(str.isdigit, phone_number))
-
-        # If starts with 0, remove and add 254
         if phone_number.startswith('0'):
             phone_number = '254' + phone_number[1:]
-        # If starts with 254, keep as is
-        elif phone_number.startswith('254'):
-            pass
-        # If starts with 7, add 254
         elif phone_number.startswith('7'):
             phone_number = '254' + phone_number
-
         return phone_number
 
     def query_status(self, checkout_request_id):
@@ -228,7 +192,6 @@ class MpesaService:
                 callback = callback_data['Body']['stkCallback']
 
                 if callback['ResultCode'] == 0:
-                    # Success
                     items = callback.get('CallbackMetadata', {}).get('Item', [])
                     payment_data = {}
                     for item in items:
@@ -241,10 +204,10 @@ class MpesaService:
                         'mpesa_code': callback.get('MerchantRequestID'),
                         'phone': payment_data.get('PhoneNumber'),
                         'result_code': '0',
-                        'result_desc': 'Success'
+                        'result_desc': 'Success',
+                        'account_reference': payment_data.get('AccountReference')
                     }
                 else:
-                    # Failed
                     return {
                         'success': False,
                         'message': callback.get('ResultDesc', 'Payment failed'),
@@ -257,6 +220,47 @@ class MpesaService:
         except Exception as e:
             logger.error(f"❌ Parse callback error: {str(e)}")
             return {'success': False, 'error': str(e)}
+
+    def parse_account_reference(self, account_reference):
+        """
+        Parse account reference in various formats:
+        - 177914#11
+        - 177914 11
+        - 177914-11
+        - 177914_11
+        - 17791411 (without separator)
+        """
+        if not account_reference:
+            return None
+
+        separators = ['#', ' ', '-', '_', '|', '/', ':']
+
+        for sep in separators:
+            if sep in account_reference:
+                parts = account_reference.split(sep)
+                if len(parts) >= 2:
+                    account_prefix = parts[0].strip()
+                    house_no = ''.join(parts[1:]).strip()
+                    return {
+                        'account_prefix': account_prefix,
+                        'house_no': house_no,
+                        'separator': sep,
+                        'original': account_reference
+                    }
+
+        known_prefixes = ['911936', '177914']
+        for prefix in known_prefixes:
+            if account_reference.startswith(prefix):
+                remaining = account_reference[len(prefix):]
+                if remaining:
+                    return {
+                        'account_prefix': prefix,
+                        'house_no': remaining,
+                        'separator': 'none',
+                        'original': account_reference
+                    }
+
+        return None
 
     def simulate_payment(self, phone_number, amount, account_reference):
         """Simulate a payment for testing (sandbox only)"""

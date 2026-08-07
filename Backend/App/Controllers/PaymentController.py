@@ -89,13 +89,14 @@ class PaymentController:
             'payment': payment.to_dict()
         }), 201
 
-    # App/Controllers/PaymentController.py - Fixed confirm_payment
+    # App/Controllers/PaymentController.py - Updated confirm_payment with duplicate detection
 
     @staticmethod
     @jwt_required()
     def confirm_payment():
         """
         Confirm a payment - Hybrid approach using phone, name, or house number
+        WITH DUPLICATE DETECTION
         """
         try:
             data = request.json
@@ -111,6 +112,53 @@ class PaymentController:
             payment_for_month = data.get('payment_for_month')
             notes = data.get('notes')
             tenant_id = data.get('tenant_id')  # For manual selection
+
+            # ✅ CRITICAL: Check for duplicate payment by M-Pesa code
+            if mpesa_code:
+                existing_payment = Payment.query.filter_by(mpesa_code=mpesa_code).first()
+                if existing_payment:
+                    logger.warning(f"⚠️ DUPLICATE PAYMENT DETECTED: M-Pesa code {mpesa_code} already exists")
+                    return jsonify({
+                        'success': False,
+                        'message': 'Duplicate payment detected. This M-Pesa transaction has already been recorded.',
+                        'duplicate': True,
+                        'existing_payment': existing_payment.to_dict(),
+                        'action': 'review_duplicate'
+                    }), 409  # 409 Conflict
+
+            # Also check by receipt number if provided
+            if receipt_no:
+                existing_by_receipt = Payment.query.filter_by(receipt_no=receipt_no).first()
+                if existing_by_receipt:
+                    logger.warning(f"⚠️ DUPLICATE PAYMENT DETECTED: Receipt {receipt_no} already exists")
+                    return jsonify({
+                        'success': False,
+                        'message': 'Duplicate payment detected. This receipt number already exists.',
+                        'duplicate': True,
+                        'existing_payment': existing_by_receipt.to_dict(),
+                        'action': 'review_duplicate'
+                    }), 409
+
+            # Also check by combination of amount, phone, and date (within 5 minutes)
+            if amount and phone:
+                from datetime import datetime, timedelta
+                time_threshold = datetime.now() - timedelta(minutes=5)
+                recent_duplicate = Payment.query.filter(
+                    Payment.amount == amount,
+                    Payment.phone_number == phone,
+                    Payment.payment_date >= time_threshold
+                ).first()
+
+                if recent_duplicate:
+                    logger.warning(
+                        f"⚠️ POTENTIAL DUPLICATE: Same amount ({amount}) from same phone ({phone}) within 5 minutes")
+                    return jsonify({
+                        'success': False,
+                        'message': 'Potential duplicate payment detected. Same amount from same phone within 5 minutes.',
+                        'duplicate': True,
+                        'existing_payment': recent_duplicate.to_dict(),
+                        'action': 'review_duplicate'
+                    }), 409
 
             tenant = None
             matched_by = None
@@ -274,12 +322,16 @@ class PaymentController:
                 'error': str(e)
             }), 500
 
+    # App/Controllers/PaymentController.py - Replace the match_payment method
+
     @staticmethod
     @jwt_required()
     def match_payment():
         """Match a payment to a tenant - Enhanced with multiple criteria"""
         try:
             data = request.json
+            logger.info(f"🔍 Matching payment with data: {data}")
+
             phone = data.get('phone')
             amount = data.get('amount')
             name = data.get('name')
@@ -287,7 +339,6 @@ class PaymentController:
             property_id = data.get('property_id')
 
             results = []
-            tenant = None
 
             # 1. Match by phone
             if phone:
@@ -305,20 +356,64 @@ class PaymentController:
                         'matched_by': 'phone'
                     })
 
-            # 2. Match by house number
-            if not tenant and house_no:
-                tenant = Tenant.query.filter_by(houseNo=str(house_no).strip().upper()).first()
-                if tenant:
-                    results.append({
-                        'tenant': tenant.to_dict(),
-                        'match_score': 90,
-                        'matched_by': 'house_number'
-                    })
+            # 2. Match by house number (with multiple formats)
+            if house_no:
+                from App.Models.UnitModel import Unit
+
+                # Clean house number
+                house_no_clean = str(house_no).strip().upper()
+
+                # Try different formats
+                formats = [
+                    house_no_clean,  # "11"
+                    house_no_clean.zfill(3),  # "011"
+                    house_no_clean.lstrip('0'),  # "11"
+                    house_no_clean.rjust(3, '0'),  # "011"
+                    house_no_clean.replace('-', ''),  # Remove dashes
+                    house_no_clean.replace(' ', ''),  # Remove spaces
+                ]
+
+                # Add letter variations
+                if house_no_clean.isdigit():
+                    formats.append(str(int(house_no_clean)))  # "11" -> "11"
+
+                # Remove duplicates
+                formats = list(dict.fromkeys(formats))
+
+                logger.info(f"🔍 Trying house number formats: {formats}")
+
+                for fmt in formats:
+                    unit = Unit.query.filter_by(unit_number=fmt).first()
+                    if unit:
+                        tenant = Tenant.query.filter_by(unit_id=unit.id, status='active').first()
+                        if tenant:
+                            results.append({
+                                'tenant': tenant.to_dict(),
+                                'match_score': 95,
+                                'matched_by': f'house_number_{fmt}'
+                            })
+                            break
+
+                # If no exact match, try partial match
+                if not any(r['matched_by'].startswith('house_number') for r in results):
+                    units = Unit.query.filter(
+                        Unit.unit_number.ilike(f'%{house_no_clean}%')
+                    ).all()
+                    for unit in units:
+                        tenant = Tenant.query.filter_by(unit_id=unit.id, status='active').first()
+                        if tenant:
+                            results.append({
+                                'tenant': tenant.to_dict(),
+                                'match_score': 80,
+                                'matched_by': 'house_number_partial'
+                            })
 
             # 3. Match by name (partial)
             if name:
+                name_clean = name.strip().lower()
                 tenants = Tenant.query.filter(
-                    Tenant.name.ilike(f'%{name.strip()}%')
+                    Tenant.name.ilike(f'%{name_clean}%'),
+                    Tenant.status == 'active'
                 ).all()
                 for t in tenants:
                     results.append({
@@ -357,6 +452,9 @@ class PaymentController:
                     'candidates': []
                 }), 404
 
+            # Sort by match score (highest first)
+            unique_results.sort(key=lambda x: x['match_score'], reverse=True)
+
             return jsonify({
                 'success': True,
                 'candidates': unique_results,
@@ -366,7 +464,9 @@ class PaymentController:
 
         except Exception as e:
             logger.error(f"Error matching payment: {str(e)}")
-            return jsonify({'message': str(e)}), 500
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': str(e)}), 500
 
     @staticmethod
     @jwt_required()
@@ -509,7 +609,7 @@ class PaymentController:
 
     @staticmethod
     def mpesa_callback():
-        """Handle M-Pesa callback from Safaricom"""
+        """Handle M-Pesa callback from Safaricom with duplicate detection"""
         try:
             data = request.json
             logger.info(f"Received M-Pesa callback: {data}")
@@ -523,6 +623,13 @@ class PaymentController:
                 phone = parsed.get('phone')
                 mpesa_code = parsed.get('mpesa_code')
                 checkout_id = data.get('Body', {}).get('stkCallback', {}).get('CheckoutRequestID')
+
+                # ✅ Check for duplicate by M-Pesa code
+                if mpesa_code:
+                    existing = Payment.query.filter_by(mpesa_code=mpesa_code).first()
+                    if existing:
+                        logger.warning(f"⚠️ DUPLICATE CALLBACK: M-Pesa code {mpesa_code} already processed")
+                        return jsonify({'ResultCode': 0, 'ResultDesc': 'Duplicate callback ignored'}), 200
 
                 payment = Payment.query.filter_by(checkout_request_id=checkout_id).first()
 
@@ -1071,3 +1178,92 @@ class PaymentController:
             logger.error(f"Error reversing payment: {str(e)}")
             db.session.rollback()
             return jsonify({'message': str(e)}), 500
+
+    # App/Controllers/PaymentController.py - Add AI parsing endpoint
+
+    @staticmethod
+    @jwt_required()
+    def parse_payment_sms():
+        """Parse M-Pesa SMS using AI-powered parser"""
+        try:
+            data = request.json
+            sms_text = data.get('sms_text', '')
+            property_id = data.get('property_id')
+
+            if not sms_text:
+                return jsonify({'error': 'SMS text is required'}), 400
+
+            # Use the AI parser (frontend will handle parsing)
+            # We'll use a Python regex-based parser as fallback
+            parsed = PaymentController._parse_mpesa_sms(sms_text)
+
+            if not parsed:
+                return jsonify({
+                    'success': False,
+                    'message': 'Could not parse SMS',
+                    'parsed': False
+                }), 400
+
+            # Find matching tenant
+            tenant = None
+            candidates = []
+
+            # Try to find by house number
+            if parsed.get('house_no'):
+                from App.Models.UnitModel import Unit
+                house_no_clean = str(parsed['house_no']).strip().upper()
+
+                # Try different formats
+                formats = [house_no_clean, house_no_clean.zfill(3), house_no_clean.lstrip('0')]
+                formats = list(dict.fromkeys(formats))
+
+                for fmt in formats:
+                    unit = Unit.query.filter_by(
+                        unit_number=fmt,
+                        property_id=property_id
+                    ).first()
+                    if unit:
+                        tenant = Tenant.query.filter_by(unit_id=unit.id, status='active').first()
+                        if tenant:
+                            parsed['matched_by'] = 'house_number'
+                            break
+
+            # If not found by house, try phone
+            if not tenant and parsed.get('phone_number'):
+                phone_clean = parsed['phone_number']
+                tenant = Tenant.query.filter_by(phone=phone_clean).first()
+                if tenant:
+                    parsed['matched_by'] = 'phone'
+
+            # If not found by phone, try name
+            if not tenant and parsed.get('sender_name'):
+                name_clean = parsed['sender_name'].strip().lower()
+                tenants = Tenant.query.filter(
+                    Tenant.name.ilike(f'%{name_clean}%'),
+                    Tenant.status == 'active'
+                ).all()
+                if len(tenants) == 1:
+                    tenant = tenants[0]
+                    parsed['matched_by'] = 'name'
+                elif len(tenants) > 1:
+                    candidates = [t.to_dict() for t in tenants]
+
+            if tenant:
+                parsed['tenant'] = tenant.to_dict()
+                parsed['tenant_id'] = tenant.id
+                parsed['matched'] = True
+            else:
+                parsed['matched'] = False
+                if not candidates:
+                    parsed['message'] = 'No tenant matched'
+
+            if candidates:
+                parsed['candidates'] = candidates
+
+            return jsonify(parsed), 200
+
+        except Exception as e:
+            logger.error(f"Error parsing payment SMS: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': str(e)}), 500
