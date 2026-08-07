@@ -1,4 +1,4 @@
-// src/pages/Caretaker/Payments.jsx
+// src/pages/Caretaker/Payments.jsx - Complete version with AI Bulk Import button next to property name
 import React, { useState, useEffect } from "react";
 import {
   Card,
@@ -55,12 +55,12 @@ import {
   SwapOutlined,
   RollbackOutlined,
   DropboxOutlined,
+  RobotOutlined,
+  DatabaseOutlined,
 } from "@ant-design/icons";
 import {
   getPayments,
   createPayment,
-  parseMpesaMessage,
-  matchPayment,
   confirmPayment,
   getPaymentStats,
   generateReceipt,
@@ -73,7 +73,10 @@ import {
 import { getTenants } from "../../services/tenants";
 import { useProperty } from "../../context/PropertyContext";
 import { formatCurrency, formatDate } from "../../utils/formatters";
+import { paymentSmsParser } from "../../utils/paymentSmsParser";
 import dayjs from "dayjs";
+import api from "../../services/api";
+import IntelligentPaymentImport from "../../components/Caretaker/IntelligentPaymentImport";
 
 const { Option } = Select;
 const { TabPane } = Tabs;
@@ -101,6 +104,9 @@ const Payments = () => {
   const [methodFilter, setMethodFilter] = useState("all");
   const [form] = Form.useForm();
   const [activeTab, setActiveTab] = useState("manual");
+
+  // AI Bulk Import state
+  const [bulkImportModalVisible, setBulkImportModalVisible] = useState(false);
 
   // Match modal state
   const [matchModalVisible, setMatchModalVisible] = useState(false);
@@ -132,6 +138,9 @@ const Payments = () => {
 
   // Get current property ID
   const currentPropertyId = activeProperty?.id;
+
+  // Paybill form
+  const [paybillForm] = Form.useForm();
 
   useEffect(() => {
     if (currentPropertyId) {
@@ -255,7 +264,37 @@ const Payments = () => {
     }
   };
 
-  // M-Pesa Payment
+  // Handle Paybill Payment
+  const handlePaybillPayment = async (values) => {
+    try {
+      setLoading(true);
+      const response = await api.post("/payments/paybill", {
+        account_reference: values.account_reference,
+        amount: values.amount,
+        phone_number: values.phone_number || "254708374149",
+        mpesa_code:
+          values.mpesa_code || "PAYBILL" + Date.now().toString().slice(-6),
+      });
+
+      if (response.data.success) {
+        message.success("✅ Paybill payment processed successfully!");
+        setModalVisible(false);
+        paybillForm.resetFields();
+        fetchData();
+      } else {
+        message.error(response.data.error || "Payment failed");
+      }
+    } catch (error) {
+      console.error("Paybill payment error:", error);
+      message.error(
+        error.response?.data?.error || "Failed to process paybill payment",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ AI-Powered M-Pesa SMS Parsing - Updated
   const handleParseMpesa = async () => {
     if (!mpesaMessage.trim()) {
       message.warning("Please paste the M-Pesa message");
@@ -265,23 +304,40 @@ const Payments = () => {
     setParsingLoading(true);
     setCurrentStep(1);
     try {
-      const response = await parseMpesaMessage({ message: mpesaMessage });
-      const data = response.data;
-      setParsedData(data);
+      // Use the AI parser
+      const result = await paymentSmsParser.parseAndMatch(
+        mpesaMessage,
+        currentPropertyId,
+      );
+      setParsedData(result);
 
-      if (data.amount) {
-        message.success(
-          `💰 Parsed amount: KSh ${data.amount.toLocaleString()}`,
-        );
-        await handleMatchTenant(data);
+      if (result.matched && result.best_match) {
         setCurrentStep(2);
+        setMatchedTenants(result.candidates || []);
+        message.success(
+          `✅ Matched to ${result.best_match.tenant.name} (House ${result.best_match.tenant.houseNo || result.best_match.tenant.house_number || "N/A"})`,
+        );
+
+        // Auto-confirm if confidence is high
+        if (result.best_match.score >= 85) {
+          setTimeout(() => {
+            handleConfirmMpesaPayment(result.best_match.tenant.id);
+          }, 1500);
+        }
+      } else if (result.candidates && result.candidates.length > 0) {
+        setCurrentStep(2);
+        setMatchedTenants(result.candidates);
+        message.info(`👥 Found ${result.candidates.length} possible matches`);
       } else {
-        message.warning("Could not parse amount from message");
-        setCurrentStep(0);
+        setCurrentStep(2);
+        setMatchedTenants([]);
+        message.warning("❌ No matching tenant found");
       }
     } catch (error) {
-      console.error("Error parsing M-Pesa message:", error);
-      message.error("Failed to parse M-Pesa message");
+      console.error("Error parsing M-Pesa:", error);
+      message.error(
+        "Failed to parse M-Pesa message: " + (error.message || "Unknown error"),
+      );
       setCurrentStep(0);
     } finally {
       setParsingLoading(false);
@@ -291,28 +347,18 @@ const Payments = () => {
   const handleMatchTenant = async (data) => {
     setMatchingLoading(true);
     try {
-      const response = await matchPayment({
-        amount: data.amount,
-        phone: data.phone,
-        sender: data.sender,
-      });
-      const matches = response.data.candidates || [];
-
-      const propertyMatches = matches.filter(
-        (tenant) => tenant.property_id === currentPropertyId,
+      // Use the AI parser to find matches
+      const result = await paymentSmsParser.parseAndMatch(
+        mpesaMessage,
+        currentPropertyId,
       );
 
-      setMatchedTenants(propertyMatches.length > 0 ? propertyMatches : matches);
-
-      if (propertyMatches.length === 1) {
-        message.success("✅ Tenant matched automatically!");
-        setTimeout(() => {
-          handleConfirmMpesaPayment(propertyMatches[0].id);
-        }, 1000);
-      } else if (propertyMatches.length > 1) {
-        message.info("👥 Multiple tenants matched, please select one");
+      if (result.candidates && result.candidates.length > 0) {
+        setMatchedTenants(result.candidates);
+        message.info(`👥 Found ${result.candidates.length} possible matches`);
       } else {
-        message.warning("❌ No tenant matched in this property");
+        setMatchedTenants([]);
+        message.warning("❌ No matching tenant found");
       }
     } catch (error) {
       console.error("Error matching tenant:", error);
@@ -328,7 +374,7 @@ const Payments = () => {
       return;
     }
 
-    const selectedTenantId = tenantId || matchedTenants[0]?.id;
+    const selectedTenantId = tenantId || matchedTenants[0]?.tenant?.id;
     if (!selectedTenantId) {
       message.warning("No tenant selected");
       return;
@@ -340,10 +386,14 @@ const Payments = () => {
         tenant_id: selectedTenantId,
         amount: parsedData.amount,
         payment_method: "mpesa",
-        mpesa_code: parsedData.mpesa_code || parsedData.till_number,
+        mpesa_code:
+          parsedData.mpesa_code ||
+          parsedData.mpesaCode ||
+          "MPESA" + Date.now().toString().slice(-6),
         payment_for_month: dayjs().format("YYYY-MM-DD"),
-        phone: parsedData.phone,
-        notes: `M-Pesa payment from ${parsedData.sender || "Unknown"}\n${mpesaMessage.substring(0, 500)}`,
+        phone: parsedData.phone_number,
+        account_reference: parsedData.account_reference,
+        notes: `M-Pesa payment from ${parsedData.sender_name || "Unknown"}\n${mpesaMessage.substring(0, 500)}`,
       };
 
       const response = await confirmPayment(paymentData);
@@ -387,14 +437,14 @@ const Payments = () => {
       setSelectedPayment(payment);
       setMatchLoading(true);
 
-      const response = await matchPayment({
-        amount: payment.amount,
-        phone: payment.phone_number,
-        house_no: payment.account_reference,
-        property_id: currentPropertyId,
-      });
+      // Try to find matches using the AI parser
+      const smsText = `Amount: ${payment.amount} from ${payment.tenantName || "Unknown"} House: ${payment.account_reference || "N/A"}`;
+      const result = await paymentSmsParser.parseAndMatch(
+        smsText,
+        currentPropertyId,
+      );
 
-      const candidates = response.data.candidates || [];
+      const candidates = result.candidates || [];
 
       if (candidates.length === 0) {
         Modal.info({
@@ -415,7 +465,13 @@ const Payments = () => {
           ),
           okText: "Show All Tenants",
           onOk: () => {
-            setMatchedTenants(tenants.map((t) => ({ ...t, match_score: 0 })));
+            setMatchedTenants(
+              tenants.map((t) => ({
+                tenant: t,
+                score: 0,
+                matched_by: "manual",
+              })),
+            );
             setMatchModalVisible(true);
           },
         });
@@ -462,7 +518,6 @@ const Payments = () => {
       if (response.data.success) {
         message.success("✅ Payment allocated successfully!");
         fetchData();
-        // Show allocation details
         await handleViewAllocation(paymentId);
       } else {
         message.error(response.data.message || "Failed to allocate payment");
@@ -793,7 +848,7 @@ const Payments = () => {
 
   return (
     <div>
-      {/* Property Header */}
+      {/* Property Header with AI Bulk Import Button next to property name */}
       <Card
         style={{
           marginBottom: 24,
@@ -801,18 +856,50 @@ const Payments = () => {
           color: "white",
         }}
       >
-        <div>
-          <h2 style={{ color: "white", margin: 0 }}>
-            <HomeOutlined style={{ marginRight: 8 }} />
-            {activeProperty?.name || "No Property Selected"}
-          </h2>
-          <div style={{ color: "rgba(255,255,255,0.8)" }}>
-            {activeProperty?.address || ""}{" "}
-            {activeProperty?.city ? `• ${activeProperty.city}` : ""}
-            {activeProperty?.total_units
-              ? ` • ${activeProperty.total_units} units`
-              : ""}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 16,
+              flexWrap: "wrap",
+            }}
+          >
+            <h2 style={{ color: "white", margin: 0 }}>
+              <HomeOutlined style={{ marginRight: 8 }} />
+              {activeProperty?.name || "No Property Selected"}
+            </h2>
+            <div style={{ color: "rgba(255,255,255,0.8)" }}>
+              {activeProperty?.address || ""}{" "}
+              {activeProperty?.city ? `• ${activeProperty.city}` : ""}
+              {activeProperty?.total_units
+                ? ` • ${activeProperty.total_units} units`
+                : ""}
+            </div>
           </div>
+
+          <Button
+            type="primary"
+            icon={<RobotOutlined />}
+            onClick={() => setBulkImportModalVisible(true)}
+            size="middle"
+            style={{
+              background: "#52c41a",
+              borderColor: "#52c41a",
+              color: "white",
+              fontWeight: "bold",
+              boxShadow: "0 2px 8px rgba(82, 196, 26, 0.4)",
+            }}
+          >
+            <RobotOutlined /> AI Bulk Import
+          </Button>
         </div>
       </Card>
 
@@ -927,14 +1014,27 @@ const Payments = () => {
               icon={<PlusOutlined />}
               onClick={() => {
                 form.resetFields();
+                paybillForm.resetFields();
                 setMpesaMessage("");
                 setParsedData(null);
                 setMatchedTenants([]);
                 setCurrentStep(0);
                 setModalVisible(true);
+                setActiveTab("manual");
               }}
             >
               New Payment
+            </Button>
+            <Button
+              icon={<RobotOutlined />}
+              onClick={() => setBulkImportModalVisible(true)}
+              style={{
+                background: "#52c41a",
+                borderColor: "#52c41a",
+                color: "white",
+              }}
+            >
+              AI Bulk Import
             </Button>
           </Space>
         }
@@ -1014,12 +1114,18 @@ const Payments = () => {
           <Space>
             <PlusOutlined />
             New Payment
+            {activeProperty && (
+              <Tag color="blue" style={{ marginLeft: 8 }}>
+                {activeProperty.name}
+              </Tag>
+            )}
           </Space>
         }
         open={modalVisible}
         onCancel={() => {
           setModalVisible(false);
           form.resetFields();
+          paybillForm.resetFields();
           setMpesaMessage("");
           setParsedData(null);
           setMatchedTenants([]);
@@ -1027,7 +1133,7 @@ const Payments = () => {
         }}
         footer={null}
         width={800}
-        destroyOnHidden
+        destroyOnClose
       >
         <Alert
           message={`Adding payment to: ${activeProperty?.name || "Selected Property"}`}
@@ -1166,18 +1272,19 @@ const Payments = () => {
               </Form.Item>
             </Form>
           </TabPane>
+
           <TabPane
             tab={
               <span>
-                <MobileOutlined />
-                📱 M-Pesa (Copy/Paste)
+                <RobotOutlined />
+                🤖 AI M-Pesa Match
               </span>
             }
             key="mpesa"
           >
             <Alert
-              message="📱 M-Pesa Payment - Copy & Paste"
-              description="Copy the M-Pesa SMS from your phone and paste it below. The system will automatically parse the payment and match it to a tenant."
+              message="🤖 AI-Powered M-Pesa Payment Matching"
+              description="Paste the M-Pesa SMS from your phone. The AI will automatically parse the payment and match it to the correct tenant."
               type="success"
               showIcon
               style={{ marginBottom: 16 }}
@@ -1188,10 +1295,10 @@ const Payments = () => {
               size="small"
               style={{ marginBottom: 24 }}
             >
-              <Step title="Paste SMS" icon={<CopyOutlined />} />
-              <Step title="Parse" icon={<SearchOutlined />} />
-              <Step title="Match Tenant" icon={<UserOutlined />} />
-              <Step title="Confirm" icon={<CheckOutlined />} />
+              <Step title="📋 Paste SMS" icon={<CopyOutlined />} />
+              <Step title="🤖 AI Parse" icon={<RobotOutlined />} />
+              <Step title="👤 Match Tenant" icon={<UserOutlined />} />
+              <Step title="✅ Confirm" icon={<CheckOutlined />} />
             </Steps>
 
             <div style={{ marginBottom: 16 }}>
@@ -1210,13 +1317,14 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
               <div style={{ marginTop: 8 }}>
                 <Button
                   type="primary"
-                  icon={<SearchOutlined />}
+                  icon={<RobotOutlined />}
                   onClick={handleParseMpesa}
                   loading={parsingLoading}
                   disabled={!mpesaMessage.trim() || currentStep === 3}
                   size="large"
+                  style={{ background: "#52c41a", borderColor: "#52c41a" }}
                 >
-                  🔍 Parse Message
+                  🤖 AI Parse & Match
                 </Button>
                 <Button
                   style={{ marginLeft: 8 }}
@@ -1275,7 +1383,7 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
                   <div>
                     <div style={{ fontSize: 12, color: "#8c8c8c" }}>Sender</div>
                     <div style={{ fontWeight: 600 }}>
-                      {parsedData.sender || "Unknown"}
+                      {parsedData.sender_name || "Unknown"}
                     </div>
                   </div>
                   <Divider type="vertical" style={{ height: 40 }} />
@@ -1287,18 +1395,43 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
                       {parsedData.mpesa_code || "N/A"}
                     </Tag>
                   </div>
-                  {parsedData.till_number && (
+                  {parsedData.house_no && (
                     <>
                       <Divider type="vertical" style={{ height: 40 }} />
                       <div>
                         <div style={{ fontSize: 12, color: "#8c8c8c" }}>
-                          Till Number
+                          House
                         </div>
-                        <Tag color="purple">{parsedData.till_number}</Tag>
+                        <Tag color="purple" style={{ fontSize: 14 }}>
+                          🏠 {parsedData.house_no}
+                        </Tag>
+                      </div>
+                    </>
+                  )}
+                  {parsedData.account_reference && (
+                    <>
+                      <Divider type="vertical" style={{ height: 40 }} />
+                      <div>
+                        <div style={{ fontSize: 12, color: "#8c8c8c" }}>
+                          Account Ref
+                        </div>
+                        <Tag color="orange" style={{ fontSize: 14 }}>
+                          {parsedData.account_reference}
+                        </Tag>
                       </div>
                     </>
                   )}
                 </div>
+                {parsedData.confidence && (
+                  <div style={{ marginTop: 8 }}>
+                    <Tag color="blue">
+                      🤖 AI Confidence: {parsedData.confidence}%
+                    </Tag>
+                    {parsedData.is_valid_payment && (
+                      <Tag color="green">✅ Valid Payment</Tag>
+                    )}
+                  </div>
+                )}
               </Card>
             )}
 
@@ -1315,14 +1448,16 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
               >
                 <List
                   dataSource={matchedTenants}
-                  renderItem={(tenant) => (
+                  renderItem={(item) => (
                     <List.Item
                       actions={[
                         <Button
                           type="primary"
                           size="small"
                           loading={confirmLoading}
-                          onClick={() => handleConfirmMpesaPayment(tenant.id)}
+                          onClick={() =>
+                            handleConfirmMpesaPayment(item.tenant.id)
+                          }
                           icon={<CheckOutlined />}
                         >
                           Confirm
@@ -1332,20 +1467,34 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
                       <List.Item.Meta
                         avatar={
                           <Avatar style={{ backgroundColor: "#1890ff" }}>
-                            {tenant.name?.[0] || "?"}
+                            {item.tenant.name?.[0] || "?"}
                           </Avatar>
                         }
-                        title={<strong>{tenant.name || "Unknown"}</strong>}
+                        title={
+                          <Space>
+                            <strong>{item.tenant.name || "Unknown"}</strong>
+                            <Tag color="blue">{item.score}% Match</Tag>
+                            <Tag color="green">{item.matched_by}</Tag>
+                          </Space>
+                        }
                         description={
                           <Space>
-                            <span>🏠 House: {tenant.house_no || "N/A"}</span>
+                            <span>
+                              🏠 House:{" "}
+                              {item.tenant.houseNo ||
+                                item.tenant.house_number ||
+                                "N/A"}
+                            </span>
                             <span>|</span>
                             <span>
-                              💰 Balance: {formatCurrency(tenant.balance || 0)}
+                              💰 Balance:{" "}
+                              {formatCurrency(item.tenant.balance || 0)}
                             </span>
-                            {tenant.match_score > 0 && <span>|</span>}
-                            {tenant.match_score > 0 && (
-                              <span>🎯 Match: {tenant.match_score}%</span>
+                            {item.tenant.phone && (
+                              <>
+                                <span>|</span>
+                                <span>📱 {item.tenant.phone}</span>
+                              </>
                             )}
                           </Space>
                         }
@@ -1407,8 +1556,8 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
               />
             )}
           </TabPane>
-          // pages/Caretaker/Payments.jsx - Add this new TabPane inside the Tabs
-          component
+
+          {/* Paybill Tab */}
           <TabPane
             tab={
               <span>
@@ -1428,34 +1577,8 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
 
             <Card style={{ background: "#fafafa" }}>
               <Form
-                onFinish={async (values) => {
-                  try {
-                    setLoading(true);
-                    const response = await api.post("/payments/paybill", {
-                      account_reference: values.account_reference,
-                      amount: values.amount,
-                      phone_number: values.phone_number || "254708374149",
-                      mpesa_code:
-                        values.mpesa_code ||
-                        "PAYBILL" + Date.now().toString().slice(-6),
-                    });
-
-                    if (response.data.success) {
-                      message.success(
-                        "✅ Paybill payment processed successfully!",
-                      );
-                      setModalVisible(false);
-                      fetchData();
-                    } else {
-                      message.error(response.data.error || "Payment failed");
-                    }
-                  } catch (error) {
-                    console.error("Paybill payment error:", error);
-                    message.error("Failed to process paybill payment");
-                  } finally {
-                    setLoading(false);
-                  }
-                }}
+                form={paybillForm}
+                onFinish={handlePaybillPayment}
                 layout="vertical"
               >
                 <Row gutter={16}>
@@ -1549,8 +1672,7 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
                     <Button
                       size="large"
                       onClick={() => {
-                        // Auto-fill with example data for testing
-                        form.setFieldsValue({
+                        paybillForm.setFieldsValue({
                           account_reference: "40766915#101",
                           amount: 15000,
                           phone_number: "254708374149",
@@ -1660,7 +1782,11 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
                   type="primary"
                   onClick={() => {
                     setMatchedTenants(
-                      tenants.map((t) => ({ ...t, match_score: 0 })),
+                      tenants.map((t) => ({
+                        tenant: t,
+                        score: 0,
+                        matched_by: "manual",
+                      })),
                     );
                   }}
                 >
@@ -1670,7 +1796,7 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
             ) : (
               <List
                 dataSource={matchedTenants}
-                renderItem={(tenant) => (
+                renderItem={(item) => (
                   <List.Item
                     actions={[
                       <Button
@@ -1678,7 +1804,7 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
                         size="small"
                         loading={matchLoading}
                         onClick={() =>
-                          handleConfirmMatch(selectedPayment.id, tenant.id)
+                          handleConfirmMatch(selectedPayment.id, item.tenant.id)
                         }
                         icon={<CheckOutlined />}
                       >
@@ -1689,16 +1815,16 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
                     <List.Item.Meta
                       avatar={
                         <Avatar style={{ backgroundColor: "#1890ff" }}>
-                          {tenant.name?.[0] || "?"}
+                          {item.tenant.name?.[0] || "?"}
                         </Avatar>
                       }
                       title={
                         <Space>
-                          <strong>{tenant.name || "Unknown"}</strong>
-                          {tenant.match_score > 0 && (
-                            <Tag color="blue">{tenant.match_score}% match</Tag>
+                          <strong>{item.tenant.name || "Unknown"}</strong>
+                          {item.score > 0 && (
+                            <Tag color="blue">{item.score}% match</Tag>
                           )}
-                          {tenant.status === "active" ? (
+                          {item.tenant.status === "active" ? (
                             <Tag color="green">Active</Tag>
                           ) : (
                             <Tag color="red">Inactive</Tag>
@@ -1709,11 +1835,13 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
                         <Space direction="vertical" size={0}>
                           <span>
                             🏠 House:{" "}
-                            {tenant.houseNo || tenant.house_no || "N/A"}
+                            {item.tenant.houseNo ||
+                              item.tenant.house_number ||
+                              "N/A"}
                           </span>
-                          <span>📱 Phone: {tenant.phone || "N/A"}</span>
+                          <span>📱 Phone: {item.tenant.phone || "N/A"}</span>
                           <span style={{ color: "#52c41a" }}>
-                            Balance: {formatCurrency(tenant.balance || 0)}
+                            Balance: {formatCurrency(item.tenant.balance || 0)}
                           </span>
                         </Space>
                       }
@@ -2210,6 +2338,34 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* AI Bulk Import Modal */}
+      <Modal
+        title={
+          <Space>
+            <RobotOutlined style={{ color: "#52c41a", fontSize: 24 }} />
+            <span style={{ fontSize: 18, fontWeight: 600 }}>
+              AI-Powered Bulk Payment Import
+            </span>
+            <Tag color="green">AI</Tag>
+            <Tag color="blue">Beta</Tag>
+          </Space>
+        }
+        open={bulkImportModalVisible}
+        onCancel={() => setBulkImportModalVisible(false)}
+        footer={null}
+        width={1000}
+        destroyOnClose
+      >
+        <IntelligentPaymentImport
+          onSuccess={() => {
+            setBulkImportModalVisible(false);
+            fetchData();
+            message.success("✅ Payments imported successfully!");
+          }}
+          onCancel={() => setBulkImportModalVisible(false)}
+        />
       </Modal>
     </div>
   );

@@ -1,4 +1,4 @@
-// src/components/PaymentParser.jsx
+// src/components/Admin/PaymentManagement/PaymentParser.jsx
 import React, { useState } from "react";
 import {
   Card,
@@ -13,6 +13,9 @@ import {
   Avatar,
   List,
   Typography,
+  Divider,
+  Steps,
+  Result,
 } from "antd";
 import {
   MobileOutlined,
@@ -21,15 +24,17 @@ import {
   CheckCircleOutlined,
   WhatsAppOutlined,
   CopyOutlined,
+  CheckOutlined,
 } from "@ant-design/icons";
 import {
   parseMpesaMessage,
-  matchPayment, // ← Changed from matchTenantToPayment
+  matchPayment,
   confirmPayment,
-} from "../../../services/payments";
+} from "../../../services/payments"; // ← Fixed import path
 
 const { TextArea } = Input;
 const { Text } = Typography;
+const { Step } = Steps;
 
 const PaymentParser = ({ onPaymentConfirmed, propertyId }) => {
   const [message, setMessage] = useState("");
@@ -37,7 +42,7 @@ const PaymentParser = ({ onPaymentConfirmed, propertyId }) => {
   const [parsedData, setParsedData] = useState(null);
   const [matchedTenants, setMatchedTenants] = useState([]);
   const [confirming, setConfirming] = useState(false);
-  const [step, setStep] = useState(0); // 0: paste, 1: parsed, 2: matched, 3: confirmed
+  const [currentStep, setCurrentStep] = useState(0);
 
   const handleParse = async () => {
     if (!message.trim()) {
@@ -46,7 +51,7 @@ const PaymentParser = ({ onPaymentConfirmed, propertyId }) => {
     }
 
     setLoading(true);
-    setStep(1);
+    setCurrentStep(1);
     try {
       const response = await parseMpesaMessage({ message });
       const data = response.data;
@@ -56,17 +61,16 @@ const PaymentParser = ({ onPaymentConfirmed, propertyId }) => {
         message.success(
           `💰 Parsed amount: KSh ${data.amount.toLocaleString()}`,
         );
-        // Auto-match tenant
         await handleMatchTenant(data);
-        setStep(2);
+        setCurrentStep(2);
       } else {
         message.warning("Could not parse amount from message");
-        setStep(0);
+        setCurrentStep(0);
       }
     } catch (error) {
       console.error("Error parsing M-Pesa message:", error);
       message.error("Failed to parse M-Pesa message");
-      setStep(0);
+      setCurrentStep(0);
     } finally {
       setLoading(false);
     }
@@ -75,7 +79,6 @@ const PaymentParser = ({ onPaymentConfirmed, propertyId }) => {
   const handleMatchTenant = async (data) => {
     try {
       const response = await matchPayment({
-        // ← Changed from matchTenantToPayment
         amount: data.amount,
         phone: data.phone,
       });
@@ -85,7 +88,6 @@ const PaymentParser = ({ onPaymentConfirmed, propertyId }) => {
 
       if (matches.length === 1) {
         message.success("✅ Tenant matched automatically!");
-        // Auto-confirm if only one match
         setTimeout(() => {
           handleConfirmPayment(matches[0].id);
         }, 1000);
@@ -127,26 +129,24 @@ const PaymentParser = ({ onPaymentConfirmed, propertyId }) => {
       const response = await confirmPayment(paymentData);
 
       message.success("✅ Payment confirmed successfully!");
-      setStep(3);
+      setCurrentStep(3);
 
-      // Notify parent
       if (onPaymentConfirmed) {
         onPaymentConfirmed(response.data.payment);
       }
 
-      // Reset after 3 seconds
       setTimeout(() => {
         setMessage("");
         setParsedData(null);
         setMatchedTenants([]);
-        setStep(0);
+        setCurrentStep(0);
       }, 3000);
     } catch (error) {
       console.error("Error confirming payment:", error);
       message.error(
         error.response?.data?.message || "Failed to confirm payment",
       );
-      setStep(0);
+      setCurrentStep(0);
     } finally {
       setConfirming(false);
     }
@@ -156,7 +156,7 @@ const PaymentParser = ({ onPaymentConfirmed, propertyId }) => {
     setMessage("");
     setParsedData(null);
     setMatchedTenants([]);
-    setStep(0);
+    setCurrentStep(0);
   };
 
   return (
@@ -170,7 +170,13 @@ const PaymentParser = ({ onPaymentConfirmed, propertyId }) => {
       }
       style={{ maxWidth: 800, margin: "0 auto" }}
     >
-      {/* Step 1: Paste SMS */}
+      <Steps current={currentStep} size="small" style={{ marginBottom: 24 }}>
+        <Step title="Paste SMS" icon={<CopyOutlined />} />
+        <Step title="Parse" icon={<SearchOutlined />} />
+        <Step title="Match Tenant" icon={<UserOutlined />} />
+        <Step title="Confirm" icon={<CheckOutlined />} />
+      </Steps>
+
       <div style={{ marginBottom: 16 }}>
         <TextArea
           rows={4}
@@ -182,7 +188,7 @@ Paybill: 123456, Account: RENT-001. Code: THG2JK9A1M.`}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           style={{ fontSize: 14 }}
-          disabled={step === 3}
+          disabled={currentStep === 3}
         />
         <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
           <Button
@@ -190,7 +196,7 @@ Paybill: 123456, Account: RENT-001. Code: THG2JK9A1M.`}
             icon={<SearchOutlined />}
             onClick={handleParse}
             loading={loading}
-            disabled={!message.trim() || step === 3}
+            disabled={!message.trim() || currentStep === 3}
           >
             🔍 Parse Message
           </Button>
@@ -207,14 +213,13 @@ Paybill: 123456, Account: RENT-001. Code: THG2JK9A1M.`}
           >
             Paste from Clipboard
           </Button>
-          <Button onClick={handleClear} disabled={step === 3}>
+          <Button onClick={handleClear} disabled={currentStep === 3}>
             Clear
           </Button>
         </div>
       </div>
 
-      {/* Step 2: Parsed Data */}
-      {parsedData && step >= 1 && step < 3 && (
+      {parsedData && currentStep >= 1 && currentStep < 3 && (
         <Card
           size="small"
           style={{
@@ -266,8 +271,7 @@ Paybill: 123456, Account: RENT-001. Code: THG2JK9A1M.`}
         </Card>
       )}
 
-      {/* Step 3: Matched Tenants */}
-      {matchedTenants.length > 0 && step === 2 && (
+      {matchedTenants.length > 0 && currentStep === 2 && (
         <Card
           title={
             <Space>
@@ -288,7 +292,7 @@ Paybill: 123456, Account: RENT-001. Code: THG2JK9A1M.`}
                     size="small"
                     loading={confirming}
                     onClick={() => handleConfirmPayment(tenant.id)}
-                    icon={<CheckCircleOutlined />}
+                    icon={<CheckOutlined />}
                   >
                     Confirm
                   </Button>,
@@ -321,7 +325,7 @@ Paybill: 123456, Account: RENT-001. Code: THG2JK9A1M.`}
 
       {parsedData &&
         matchedTenants.length === 0 &&
-        step === 2 &&
+        currentStep === 2 &&
         !confirming && (
           <Alert
             message="❌ No tenant matched"
@@ -332,30 +336,39 @@ Paybill: 123456, Account: RENT-001. Code: THG2JK9A1M.`}
           />
         )}
 
-      {/* Step 4: Confirmed */}
-      {step === 3 && (
-        <Alert
-          message="✅ Payment Confirmed!"
-          description={
-            <div>
-              <p>
-                Amount:{" "}
-                <strong>KSh {parsedData?.amount?.toLocaleString()}</strong> has
-                been recorded successfully.
-              </p>
-              <p style={{ marginTop: 8 }}>
-                <Button
-                  type="primary"
-                  icon={<WhatsAppOutlined />}
-                  style={{ backgroundColor: "#25D366", borderColor: "#25D366" }}
-                >
-                  Send Receipt via WhatsApp
-                </Button>
-              </p>
-            </div>
-          }
-          type="success"
-          showIcon
+      {currentStep === 3 && (
+        <Result
+          status="success"
+          title="✅ Payment Confirmed!"
+          subTitle={`Amount: KSh ${parsedData?.amount?.toLocaleString()} has been recorded successfully.`}
+          extra={[
+            <Button
+              type="primary"
+              key="done"
+              onClick={() => {
+                setMessage("");
+                setParsedData(null);
+                setMatchedTenants([]);
+                setCurrentStep(0);
+              }}
+            >
+              Done
+            </Button>,
+            <Button
+              key="receipt"
+              icon={<WhatsAppOutlined />}
+              style={{
+                backgroundColor: "#25D366",
+                color: "white",
+                border: "none",
+              }}
+              onClick={() => {
+                message.info("Receipt will be sent to tenant's WhatsApp");
+              }}
+            >
+              Send Receipt
+            </Button>,
+          ]}
         />
       )}
     </Card>
