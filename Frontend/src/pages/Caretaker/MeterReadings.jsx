@@ -48,6 +48,8 @@ import {
   ClockCircleOutlined,
   ExclamationCircleOutlined,
   HistoryOutlined,
+  RobotOutlined,
+  DatabaseOutlined,
 } from "@ant-design/icons";
 import {
   submitWaterReading,
@@ -56,13 +58,14 @@ import {
   getTenantWaterReadings,
   getWaterBills,
   generateWaterBill,
-  getPreviousReading, // ✅ Add this import
+  getPreviousReading,
 } from "../../services/water";
 import { getTenants } from "../../services/tenants";
 import { formatCurrency, formatDate } from "../../utils/formatters";
 import { useProperty } from "../../context/PropertyContext";
 import dayjs from "dayjs";
 import WaterReadingHistory from "./WaterReadingHistory";
+import IntelligentBulkWaterReadingImport from "../../components/Caretaker/IntelligentBulkWaterReadingImport";
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -76,15 +79,16 @@ const MeterReadings = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [detailVisible, setDetailVisible] = useState(false);
   const [historyModalVisible, setHistoryModalVisible] = useState(false);
+  const [bulkImportModalVisible, setBulkImportModalVisible] = useState(false);
   const [editingReading, setEditingReading] = useState(null);
   const [selectedReading, setSelectedReading] = useState(null);
   const [selectedTenantId, setSelectedTenantId] = useState(null);
-  const [selectedTenant, setSelectedTenant] = useState(null); // ✅ Add this
+  const [selectedTenant, setSelectedTenant] = useState(null);
   const [searchText, setSearchText] = useState("");
   const [tenantFilter, setTenantFilter] = useState("all");
   const [form] = Form.useForm();
   const [generatingBill, setGeneratingBill] = useState(false);
-  const [previousReadingLoading, setPreviousReadingLoading] = useState(false); // ✅ Add this
+  const [previousReadingLoading, setPreviousReadingLoading] = useState(false);
 
   // Stats
   const [stats, setStats] = useState({
@@ -118,7 +122,7 @@ const MeterReadings = () => {
     }
   }, [currentPropertyId]);
 
-  // ✅ Fetch previous reading for a tenant
+  // Fetch previous reading for a tenant
   const fetchPreviousReading = async (tenantId) => {
     setPreviousReadingLoading(true);
     try {
@@ -153,7 +157,7 @@ const MeterReadings = () => {
     }
   };
 
-  // ✅ Handle tenant selection
+  // Handle tenant selection
   const handleTenantSelect = async (value) => {
     const tenant = tenants.find((t) => t.id === value);
     if (tenant) {
@@ -162,7 +166,6 @@ const MeterReadings = () => {
         tenantId: value,
         tenantName: tenant.name,
       });
-      // ✅ Fetch previous reading
       await fetchPreviousReading(value);
     }
   };
@@ -480,18 +483,40 @@ const MeterReadings = () => {
           color: "white",
         }}
       >
-        <div>
-          <h2 style={{ color: "white", margin: 0 }}>
-            <HomeOutlined style={{ marginRight: 8 }} />
-            {activeProperty?.name || "No Property Selected"}
-          </h2>
-          <div style={{ color: "rgba(255,255,255,0.8)" }}>
-            {activeProperty?.address || ""}{" "}
-            {activeProperty?.city ? `• ${activeProperty.city}` : ""}
-            {activeProperty?.total_units
-              ? ` • ${activeProperty.total_units} units`
-              : ""}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <div>
+            <h2 style={{ color: "white", margin: 0 }}>
+              <HomeOutlined style={{ marginRight: 8 }} />
+              {activeProperty?.name || "No Property Selected"}
+            </h2>
+            <div style={{ color: "rgba(255,255,255,0.8)" }}>
+              {activeProperty?.address || ""}{" "}
+              {activeProperty?.city ? `• ${activeProperty.city}` : ""}
+              {activeProperty?.total_units
+                ? ` • ${activeProperty.total_units} units`
+                : ""}
+            </div>
           </div>
+          <Button
+            type="primary"
+            icon={<RobotOutlined />}
+            onClick={() => setBulkImportModalVisible(true)}
+            size="large"
+            style={{
+              background: "#52c41a",
+              borderColor: "#52c41a",
+              color: "white",
+              fontWeight: "bold",
+            }}
+          >
+            <RobotOutlined /> AI Bulk Import
+          </Button>
         </div>
       </Card>
 
@@ -623,6 +648,17 @@ const MeterReadings = () => {
             >
               New Reading
             </Button>
+            <Button
+              icon={<RobotOutlined />}
+              onClick={() => setBulkImportModalVisible(true)}
+              style={{
+                background: "#52c41a",
+                borderColor: "#52c41a",
+                color: "white",
+              }}
+            >
+              AI Bulk Import
+            </Button>
           </Space>
         }
       >
@@ -741,7 +777,7 @@ const MeterReadings = () => {
               showSearch
               optionFilterProp="children"
               size="large"
-              onChange={handleTenantSelect} // ✅ Use the handler
+              onChange={handleTenantSelect}
               loading={loading || previousReadingLoading}
             >
               {tenants.map((tenant) => (
@@ -1007,7 +1043,7 @@ const MeterReadings = () => {
         )}
       </Modal>
 
-      {/* Water Reading History Modal - Integrated */}
+      {/* Water Reading History Modal */}
       <WaterReadingHistory
         tenantId={selectedTenantId}
         visible={historyModalVisible}
@@ -1017,6 +1053,34 @@ const MeterReadings = () => {
         }}
         propertyId={currentPropertyId}
       />
+
+      {/* AI Bulk Import Modal */}
+      <Modal
+        title={
+          <Space>
+            <RobotOutlined style={{ color: "#52c41a", fontSize: 24 }} />
+            <span style={{ fontSize: 18, fontWeight: 600 }}>
+              AI-Powered Bulk Water Reading Import
+            </span>
+            <Tag color="green">AI</Tag>
+            <Tag color="blue">Beta</Tag>
+          </Space>
+        }
+        open={bulkImportModalVisible}
+        onCancel={() => setBulkImportModalVisible(false)}
+        footer={null}
+        width={1000}
+        destroyOnClose
+      >
+        <IntelligentBulkWaterReadingImport
+          onSuccess={() => {
+            setBulkImportModalVisible(false);
+            fetchData();
+            message.success("✅ Readings imported successfully!");
+          }}
+          onCancel={() => setBulkImportModalVisible(false)}
+        />
+      </Modal>
     </div>
   );
 };

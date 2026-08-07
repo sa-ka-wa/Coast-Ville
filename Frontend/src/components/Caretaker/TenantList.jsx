@@ -1,3 +1,4 @@
+// TenantList.jsx - Complete version with property filtering
 import React, { useState, useEffect } from "react";
 import {
   Card,
@@ -12,6 +13,7 @@ import {
   Spin,
   Badge,
   Avatar,
+  Select,
 } from "antd";
 import {
   PlusOutlined,
@@ -22,7 +24,6 @@ import {
   HomeOutlined,
   PhoneOutlined,
 } from "@ant-design/icons";
-// FIXED: Correct path is ../../services/tenants (go up 2 levels from components/Caretaker)
 import {
   getTenants,
   addTenant,
@@ -36,6 +37,9 @@ import {
   getStatusLabel,
   getInitials,
 } from "../../utils/formatters";
+import { useProperty } from "../../context/PropertyContext";
+
+const { Option } = Select;
 
 const TenantList = () => {
   const [loading, setLoading] = useState(false);
@@ -46,25 +50,47 @@ const TenantList = () => {
   const [searchText, setSearchText] = useState("");
   const [form] = Form.useForm();
 
+  // Get active property from context
+  const { activeProperty, properties } = useProperty();
+
+  // ✅ Fetch tenants when component mounts OR activeProperty changes
   useEffect(() => {
     fetchTenants();
-  }, []);
+  }, [activeProperty]);
 
   const fetchTenants = async () => {
     setLoading(true);
     try {
-      const response = await getTenants();
-      console.log("📊 Tenants from API:", response.data);
+      // ✅ Build filters object with property_id
+      const filters = {};
+      if (activeProperty) {
+        filters.property_id = parseInt(activeProperty);
+        console.log(`🔍 Filtering for property_id: ${filters.property_id}`);
+      }
+
+      console.log("📡 Calling getTenants with filters:", filters);
+      const response = await getTenants(filters);
+
+      console.log(`📊 Received ${response.data.length} tenants`);
+      if (filters.property_id) {
+        const propertyName =
+          filters.property_id === 1 ? "Coast Ville" : "Hawaii Villas";
+        console.log(`📊 ${propertyName}: ${response.data.length} tenants`);
+      }
+
       setTenants(response.data);
       setFilteredTenants(response.data);
     } catch (error) {
+      console.error("❌ Error fetching tenants:", error);
       message.error("Failed to fetch tenants");
-      console.error("Error fetching tenants:", error);
+      setTenants([]);
+      setFilteredTenants([]);
     } finally {
       setLoading(false);
     }
   };
 
+  // Search filter
   useEffect(() => {
     if (searchText) {
       const filtered = tenants.filter(
@@ -250,6 +276,13 @@ const TenantList = () => {
     form.resetFields();
   };
 
+  // Get property name by ID
+  const getPropertyName = (id) => {
+    if (!properties) return id;
+    const prop = properties.find((p) => p.id === parseInt(id));
+    return prop ? prop.name : id;
+  };
+
   if (loading && tenants.length === 0) {
     return (
       <Card>
@@ -269,7 +302,13 @@ const TenantList = () => {
           <span style={{ fontSize: 18, fontWeight: 600 }}>
             Tenant Management
           </span>
-          <Tag color="blue">{filteredTenants.length} tenants</Tag>
+          <Tag color="blue">
+            {filteredTenants.length}{" "}
+            {filteredTenants.length === 1 ? "tenant" : "tenants"}
+          </Tag>
+          {activeProperty && (
+            <Tag color="green">{getPropertyName(activeProperty)}</Tag>
+          )}
         </Space>
       }
       extra={
@@ -287,6 +326,9 @@ const TenantList = () => {
             onClick={() => {
               setEditingTenant(null);
               form.resetFields();
+              if (activeProperty) {
+                form.setFieldsValue({ property_id: parseInt(activeProperty) });
+              }
               setModalVisible(true);
             }}
           >
@@ -306,6 +348,13 @@ const TenantList = () => {
           style={{ width: 350 }}
           allowClear
         />
+        {filteredTenants.length === 0 && !loading && (
+          <span style={{ color: "#8c8c8c", marginLeft: 8 }}>
+            {activeProperty
+              ? `No tenants found for this property`
+              : "No tenants found"}
+          </span>
+        )}
       </div>
 
       <Table
@@ -388,10 +437,17 @@ const TenantList = () => {
 
           <Form.Item
             name="property_id"
-            label="Property ID"
-            rules={[{ required: true, message: "Please enter property ID" }]}
+            label="Property"
+            rules={[{ required: true, message: "Please select a property" }]}
           >
-            <Input type="number" placeholder="1" size="large" />
+            <Select placeholder="Select property" size="large">
+              {properties &&
+                properties.map((prop) => (
+                  <Option key={prop.id} value={prop.id}>
+                    {prop.name}
+                  </Option>
+                ))}
+            </Select>
           </Form.Item>
 
           <Form.Item
@@ -411,19 +467,11 @@ const TenantList = () => {
           </Form.Item>
 
           <Form.Item name="status" label="Status">
-            <select
-              style={{
-                width: "100%",
-                padding: "10px",
-                borderRadius: "8px",
-                border: "1px solid #d9d9d9",
-                fontSize: "16px",
-              }}
-            >
-              <option value="active">Active</option>
-              <option value="vacating">Vacating</option>
-              <option value="vacated">Vacated</option>
-            </select>
+            <Select size="large">
+              <Option value="active">Active</Option>
+              <Option value="vacating">Vacating</Option>
+              <Option value="vacated">Vacated</Option>
+            </Select>
           </Form.Item>
 
           <Form.Item>

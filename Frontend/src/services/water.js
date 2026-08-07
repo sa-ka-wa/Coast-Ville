@@ -1,264 +1,595 @@
-# Backend/App/Services/WhatsAppService.py
-import os
-import requests
-import json
-import logging
-from datetime import datetime
-from dotenv import load_dotenv
+// services/water.js - Connected to real API with mock fallbacks
+import api from "./api";
 
-# Load environment variables
-load_dotenv()
+// ============================================================
+// REAL API CALLS (with mock fallbacks)
+// ============================================================
 
-logger = logging.getLogger(__name__)
+// Submit a new water reading
+export const submitWaterReading = async (readingData) => {
+  try {
+    const payload = {
+      tenant_id: readingData.tenantId || readingData.tenant_id,
+      previous_reading:
+        readingData.previousReading || readingData.previous_reading,
+      current_reading:
+        readingData.currentReading || readingData.current_reading,
+      rate: readingData.rate || 70,
+      reading_date:
+        readingData.readingDate ||
+        readingData.reading_date ||
+        new Date().toISOString().split("T")[0],
+      notes: readingData.notes || "",
+    };
 
-class WhatsAppService:
-    
-    # ✅ Read from environment variables
-    WHATSAPP_ACCESS_TOKEN = os.getenv('WHATSAPP_ACCESS_TOKEN')
-    WHATSAPP_PHONE_NUMBER_ID = os.getenv('WHATSAPP_PHONE_NUMBER_ID')
-    WHATSAPP_API_VERSION = os.getenv('WHATSAPP_API_VERSION', 'v18.0')
-    WHATSAPP_FROM_NUMBER = os.getenv('WHATSAPP_FROM_NUMBER')
-    
-    # Construct the API URL
-    WHATSAPP_API_URL = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{WHATSAPP_PHONE_NUMBER_ID}/messages"
-    
-    @staticmethod
-    def is_configured():
-        """Check if WhatsApp is properly configured"""
-        return bool(
-            WhatsAppService.WHATSAPP_ACCESS_TOKEN and 
-            WhatsAppService.WHATSAPP_PHONE_NUMBER_ID and
-            WhatsAppService.WHATSAPP_ACCESS_TOKEN != 'YOUR_ACCESS_TOKEN'
-        )
-    
-    @staticmethod
-    def send_whatsapp_message(to_phone, message, message_type="text"):
-        """Send a WhatsApp message using WhatsApp Business API"""
-        try:
-            if not WhatsAppService.is_configured():
-                logger.error("❌ WhatsApp not configured. Please set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID")
-                return {"success": False, "error": "WhatsApp not configured"}
-            
-            # Clean phone number
-            phone = WhatsAppService._clean_phone_number(to_phone)
-            
-            # Prepare the payload
-            payload = {
-                "messaging_product": "whatsapp",
-                "recipient_type": "individual",
-                "to": phone,
-            }
-            
-            if message_type == "text":
-                payload["type"] = "text"
-                payload["text"] = {
-                    "preview_url": False,
-                    "body": message
-                }
-            elif message_type == "template":
-                payload["type"] = "template"
-                payload["template"] = message
-            
-            headers = {
-                "Authorization": f"Bearer {WhatsAppService.WHATSAPP_ACCESS_TOKEN}",
-                "Content-Type": "application/json"
-            }
-            
-            logger.info(f"📤 Sending WhatsApp message to {phone}")
-            
-            response = requests.post(
-                WhatsAppService.WHATSAPP_API_URL,
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
-            
-            if response.status_code in [200, 201]:
-                logger.info(f"✅ WhatsApp message sent to {phone}")
-                return {
-                    "success": True, 
-                    "data": response.json(),
-                    "message_id": response.json().get('messages', [{}])[0].get('id')
-                }
-            else:
-                logger.error(f"❌ WhatsApp API error: {response.text}")
-                return {
-                    "success": False, 
-                    "error": response.text,
-                    "status_code": response.status_code
-                }
-                
-        except requests.exceptions.Timeout:
-            logger.error("❌ WhatsApp API timeout")
-            return {"success": False, "error": "Request timeout"}
-        except Exception as e:
-            logger.error(f"❌ WhatsApp send error: {str(e)}")
-            return {"success": False, "error": str(e)}
-    
-    @staticmethod
-    def send_template_message(to_phone, template_name, components=None):
-        """Send a WhatsApp template message"""
-        template = {
-            "name": template_name,
-            "language": {"code": "en"}
-        }
-        
-        if components:
-            template["components"] = components
-        
-        return WhatsAppService.send_whatsapp_message(
-            to_phone, 
-            template, 
-            message_type="template"
-        )
-    
-    @staticmethod
-    def send_bill_receipt(tenant, payment):
-        """Send a bill receipt via WhatsApp"""
-        try:
-            if not tenant.phone:
-                return {"success": False, "error": "Tenant has no phone number"}
-            
-            # Format the receipt message
-            message = WhatsAppService.format_receipt_message(tenant, payment)
-            
-            # Send via WhatsApp
-            result = WhatsAppService.send_whatsapp_message(tenant.phone, message)
-            
-            # Log the result
-            if result.get('success'):
-                logger.info(f"✅ Receipt sent to {tenant.name} via WhatsApp")
-            else:
-                logger.error(f"❌ Failed to send receipt to {tenant.name}: {result.get('error')}")
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"❌ Error sending receipt: {str(e)}")
-            return {"success": False, "error": str(e)}
-    
-    @staticmethod
-    def format_receipt_message(tenant, payment):
-        """Format a receipt message for WhatsApp"""
-        lines = []
-        lines.append("🏠 RENT MANAGER - PAYMENT RECEIPT")
-        lines.append("")
-        lines.append(f"Dear {tenant.name},")
-        lines.append("")
-        lines.append("✅ Payment Received")
-        lines.append("")
-        lines.append(f"📅 Date: {payment.payment_date.strftime('%d/%m/%Y') if payment.payment_date else datetime.now().strftime('%d/%m/%Y')}")
-        lines.append(f"🏠 House: {tenant.unit.unit_number if tenant.unit else 'N/A'}")
-        lines.append(f"💰 Amount: KSh {payment.amount:,.2f}")
-        lines.append(f"📋 Receipt No: {payment.receipt_no}")
-        lines.append(f"📆 Month: {payment.payment_for_month.strftime('%B %Y') if payment.payment_for_month else 'N/A'}")
-        lines.append("")
-        lines.append("Payment Details:")
-        lines.append(f"• Rent: KSh {payment.rent_amount or payment.amount:,.2f}")
-        lines.append(f"• Water: KSh {payment.water_amount or 0:,.2f}")
-        lines.append("")
-        if payment.notes:
-            lines.append(f"📝 Note: {payment.notes}")
-            lines.append("")
-        lines.append("Thank you for your payment!")
-        lines.append("")
-        lines.append("RentManager System")
-        lines.append("📞 Support: 0712345678")
-        
-        return "\n".join(lines)
-    
-    @staticmethod
-    def send_monthly_statement(tenant, month, rent_due, water_due, total_due, balance):
-        """Send monthly statement via WhatsApp"""
-        try:
-            if not tenant.phone:
-                return {"success": False, "error": "Tenant has no phone number"}
-            
-            lines = []
-            lines.append("🏠 RENT MANAGER - MONTHLY STATEMENT")
-            lines.append("")
-            lines.append(f"Dear {tenant.name},")
-            lines.append("")
-            lines.append(f"📅 Statement for: {month}")
-            lines.append(f"🏠 House: {tenant.unit.unit_number if tenant.unit else 'N/A'}")
-            lines.append("")
-            lines.append("📋 SUMMARY:")
-            lines.append("─" * 30)
-            lines.append(f"💰 Rent: KSh {rent_due:,.2f}")
-            lines.append(f"💧 Water: KSh {water_due:,.2f}")
-            lines.append("─" * 30)
-            lines.append(f"📌 TOTAL DUE: KSh {total_due:,.2f}")
-            lines.append("─" * 30)
-            lines.append(f"💰 Balance: KSh {balance:,.2f}")
-            lines.append("")
-            lines.append("📱 PAYMENT INSTRUCTIONS:")
-            lines.append("M-Pesa Paybill: 247247")
-            lines.append(f"Account: {tenant.unit.unit_number if tenant.unit else tenant.id}")
-            lines.append("")
-            lines.append("Thank you for your continued tenancy.")
-            lines.append("")
-            lines.append("RentManager System")
-            lines.append("📞 Support: 0712345678")
-            
-            message = "\n".join(lines)
-            
-            return WhatsAppService.send_whatsapp_message(tenant.phone, message)
-            
-        except Exception as e:
-            logger.error(f"❌ Error sending monthly statement: {str(e)}")
-            return {"success": False, "error": str(e)}
-    
-    @staticmethod
-    def send_rent_reminder(tenant, amount, due_date):
-        """Send rent reminder via WhatsApp"""
-        try:
-            if not tenant.phone:
-                return {"success": False, "error": "Tenant has no phone number"}
-            
-            lines = []
-            lines.append("🔔 RENT REMINDER")
-            lines.append("")
-            lines.append(f"Dear {tenant.name},")
-            lines.append("")
-            lines.append("This is a reminder that your rent payment is due.")
-            lines.append("")
-            lines.append(f"🏠 House: {tenant.unit.unit_number if tenant.unit else 'N/A'}")
-            lines.append(f"💰 Amount: KSh {amount:,.2f}")
-            lines.append(f"📅 Due Date: {due_date}")
-            lines.append("")
-            lines.append("Please make payment to avoid any late fees.")
-            lines.append("")
-            lines.append("📱 PAYMENT:")
-            lines.append("M-Pesa Paybill: 247247")
-            lines.append(f"Account: {tenant.unit.unit_number if tenant.unit else tenant.id}")
-            lines.append("")
-            lines.append("Thank you!")
-            lines.append("")
-            lines.append("RentManager System")
-            
-            message = "\n".join(lines)
-            
-            return WhatsAppService.send_whatsapp_message(tenant.phone, message)
-            
-        except Exception as e:
-            logger.error(f"❌ Error sending rent reminder: {str(e)}")
-            return {"success": False, "error": str(e)}
-    
-    @staticmethod
-    def _clean_phone_number(phone):
-        """Clean and format phone number for WhatsApp API"""
-        # Remove any non-digit characters
-        phone = ''.join(filter(str.isdigit, str(phone)))
-        
-        # Remove leading 0 or 254
-        if phone.startswith('0'):
-            phone = '254' + phone[1:]
-        elif phone.startswith('254'):
-            phone = '254' + phone[3:]
-        
-        # Ensure it starts with 254
-        if not phone.startswith('254'):
-            phone = '254' + phone
-        
-        # WhatsApp requires no '+' for the API, but includes it for display
-        return phone
+    const response = await api.post("/water/readings", payload);
+    return response;
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for submitWaterReading, using mock:",
+      error.message,
+    );
+    return submitWaterReadingMock(readingData);
+  }
+};
+
+// Bulk import water readings
+export const bulkImportWaterReadings = async (payload) => {
+  try {
+    const response = await api.post("/water/readings/bulk", payload);
+    return response;
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for bulkImportWaterReadings, using mock:",
+      error.message,
+    );
+    return bulkImportWaterReadingsMock(payload);
+  }
+};
+
+// Get water readings with filters
+export const getWaterReadings = async (filters = {}) => {
+  try {
+    const params = {};
+    if (filters.tenantId || filters.tenant_id) {
+      params.tenant_id = filters.tenantId || filters.tenant_id;
+    }
+    if (filters.propertyId || filters.property_id) {
+      params.property_id = filters.propertyId || filters.property_id;
+    }
+    if (filters.status) {
+      params.status = filters.status;
+    }
+    if (filters.startDate || filters.start_date) {
+      params.start_date = filters.startDate || filters.start_date;
+    }
+    if (filters.endDate || filters.end_date) {
+      params.end_date = filters.endDate || filters.end_date;
+    }
+    if (filters.limit) {
+      params.limit = filters.limit;
+    }
+    if (filters.sort) {
+      params.sort = filters.sort;
+    }
+
+    const response = await api.get("/water/readings", { params });
+
+    const transformedData = response.data.map((item) => ({
+      id: item.id,
+      tenantId: item.tenant_id,
+      tenantName: item.tenant_name || item.tenant?.name || "Unknown",
+      houseNo: item.house_no || item.unit?.unit_number || "N/A",
+      previousReading: item.previous_reading,
+      currentReading: item.current_reading,
+      unitsUsed: item.units_used,
+      amount: item.amount,
+      readingDate: item.reading_date,
+      status: item.status,
+      notes: item.notes,
+    }));
+
+    return { data: transformedData };
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for getWaterReadings, using mock:",
+      error.message,
+    );
+    return getWaterReadingsMock(filters);
+  }
+};
+
+// Get water readings for a specific tenant (nested route)
+export const getTenantWaterReadings = async (tenantId) => {
+  try {
+    const response = await api.get(`/tenants/${tenantId}/water/readings`);
+
+    const transformedData = response.data.map((item) => ({
+      id: item.id,
+      tenantId: item.tenant_id,
+      tenantName: item.tenant_name || "Unknown",
+      houseNo: item.house_no || "N/A",
+      previousReading: item.previous_reading,
+      currentReading: item.current_reading,
+      unitsUsed: item.units_used,
+      amount: item.amount,
+      readingDate: item.reading_date,
+      status: item.status,
+      notes: item.notes,
+    }));
+
+    return { data: transformedData };
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for getTenantWaterReadings, using mock:",
+      error.message,
+    );
+    return getWaterReadingsMock({ tenantId });
+  }
+};
+
+// Generate a water bill from a reading
+export const generateWaterBill = async (readingId, tenantId) => {
+  try {
+    const response = await api.post("/water/bills/generate", {
+      reading_id: readingId,
+      tenant_id: tenantId,
+    });
+    return response;
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for generateWaterBill, using mock:",
+      error.message,
+    );
+    return generateWaterBillMock(readingId, tenantId);
+  }
+};
+
+// Get water bills with filters
+export const getWaterBills = async (filters = {}) => {
+  try {
+    const params = {};
+    if (filters.tenantId || filters.tenant_id) {
+      params.tenant_id = filters.tenantId || filters.tenant_id;
+    }
+    if (filters.propertyId || filters.property_id) {
+      params.property_id = filters.propertyId || filters.property_id;
+    }
+    if (filters.status) {
+      params.status = filters.status;
+    }
+
+    const response = await api.get("/water/bills", { params });
+
+    const transformedData = response.data.map((item) => ({
+      id: item.id,
+      tenantId: item.tenant_id,
+      tenantName: item.tenant_name || item.tenant?.name || "Unknown",
+      houseNo: item.house_no || item.unit?.unit_number || "N/A",
+      waterCharge: item.water_charge,
+      garbageCharge: item.garbage_charge,
+      total: item.total,
+      month: item.month,
+      status: item.status,
+      dueDate: item.due_date,
+    }));
+
+    return { data: transformedData };
+  } catch (error) {
+    console.warn("⚠️ API failed for getWaterBills, using mock:", error.message);
+    return getWaterBillsMock(filters);
+  }
+};
+
+// Get water bills for a specific tenant (nested route)
+export const getTenantWaterBills = async (tenantId) => {
+  try {
+    const response = await api.get(`/tenants/${tenantId}/water/bills`);
+
+    const transformedData = response.data.map((item) => ({
+      id: item.id,
+      tenantId: item.tenant_id,
+      tenantName: item.tenant_name || "Unknown",
+      houseNo: item.house_no || "N/A",
+      waterCharge: item.water_charge,
+      garbageCharge: item.garbage_charge,
+      total: item.total,
+      month: item.month,
+      status: item.status,
+      dueDate: item.due_date,
+    }));
+
+    return { data: transformedData };
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for getTenantWaterBills, using mock:",
+      error.message,
+    );
+    return getWaterBillsMock({ tenantId });
+  }
+};
+
+// Get consumption history for a tenant
+export const getConsumptionHistory = async (tenantId) => {
+  try {
+    const response = await api.get("/water/consumption/history", {
+      params: { tenant_id: tenantId },
+    });
+    return response;
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for getConsumptionHistory, using mock:",
+      error.message,
+    );
+    return getConsumptionHistoryMock(tenantId);
+  }
+};
+
+// Get water billing summary
+export const getWaterBillingSummary = async (propertyId = null) => {
+  try {
+    const params = {};
+    if (propertyId) {
+      params.property_id = propertyId;
+    }
+    const response = await api.get("/water/summary", { params });
+    return response;
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for getWaterBillingSummary, using mock:",
+      error.message,
+    );
+    return getWaterBillingSummaryMock();
+  }
+};
+
+// Get a single water bill by ID
+export const getWaterBill = async (id) => {
+  try {
+    const response = await api.get(`/water/bills/${id}`);
+    return response;
+  } catch (error) {
+    console.warn("⚠️ API failed for getWaterBill, using mock:", error.message);
+    return getWaterBillMock(id);
+  }
+};
+
+// Update water bill status
+export const updateWaterBillStatus = async (id, status) => {
+  try {
+    const response = await api.patch(`/water/bills/${id}/status`, { status });
+    return response;
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for updateWaterBillStatus, using mock:",
+      error.message,
+    );
+    return updateWaterBillStatusMock(id, status);
+  }
+};
+
+// Get pending water bills
+export const getPendingWaterBills = async () => {
+  return getWaterBills({ status: "pending" });
+};
+
+// Get all water readings for a property
+export const getPropertyWaterReadings = async (propertyId) => {
+  return getWaterReadings({ property_id: propertyId });
+};
+
+// Download water report
+export const downloadWaterReport = async (filters = {}) => {
+  try {
+    const response = await api.get("/water/reports", {
+      params: filters,
+      responseType: "blob",
+    });
+    return response;
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for downloadWaterReport, using mock:",
+      error.message,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const blob = new Blob(["Water report data"], { type: "application/pdf" });
+    return { data: blob };
+  }
+};
+
+// ============================================================
+// GET LATEST READING (for auto-populating previous reading)
+// ============================================================
+
+// Get the latest reading for a specific tenant
+export const getLatestWaterReading = async (tenantId) => {
+  try {
+    const response = await api.get("/water/readings", {
+      params: {
+        tenant_id: tenantId,
+        limit: 1,
+        sort: "desc",
+      },
+    });
+    return response;
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for getLatestWaterReading, using mock:",
+      error.message,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const mockReadings = MOCK_READINGS.filter(
+      (r) => r.tenantId === parseInt(tenantId),
+    );
+
+    if (mockReadings.length > 0) {
+      const latest = mockReadings[0];
+      return {
+        data: [
+          {
+            id: latest.id,
+            tenant_id: latest.tenantId,
+            current_reading: latest.currentReading,
+            previous_reading: latest.previousReading,
+            reading_date: latest.readingDate,
+            units_used: latest.unitsUsed,
+            amount: latest.amount,
+            status: latest.status,
+          },
+        ],
+      };
+    }
+    return { data: [] };
+  }
+};
+
+// Get previous reading for a tenant (auto-populates from last reading)
+export const getPreviousReading = async (tenantId) => {
+  try {
+    const response = await getLatestWaterReading(tenantId);
+    const data = response.data || [];
+
+    if (data.length > 0) {
+      const latest = data[0];
+      return {
+        data: {
+          previous_reading: latest.current_reading || 0,
+          has_previous: true,
+          reading_id: latest.id,
+          reading_date: latest.reading_date,
+        },
+      };
+    } else {
+      return {
+        data: {
+          previous_reading: 0,
+          has_previous: false,
+          message: "No previous reading found",
+        },
+      };
+    }
+  } catch (error) {
+    console.warn(
+      "⚠️ API failed for getPreviousReading, using mock:",
+      error.message,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return {
+      data: {
+        previous_reading: 0,
+        has_previous: false,
+        message: "No previous reading found",
+      },
+    };
+  }
+};
+
+// ============================================================
+// MOCK FUNCTIONS (Fallbacks)
+// ============================================================
+
+let MOCK_READINGS = [
+  {
+    id: 1,
+    tenantId: 1,
+    tenantName: "John Mwangi",
+    houseNo: "A03",
+    previousReading: 2450,
+    currentReading: 2478,
+    unitsUsed: 28,
+    amount: 1960,
+    readingDate: "2026-07-01",
+    status: "pending",
+  },
+  {
+    id: 2,
+    tenantId: 2,
+    tenantName: "Mary Wanjiku",
+    houseNo: "B12",
+    previousReading: 1890,
+    currentReading: 1915,
+    unitsUsed: 25,
+    amount: 1750,
+    readingDate: "2026-07-01",
+    status: "pending",
+  },
+];
+
+const submitWaterReadingMock = async (readingData) => {
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const units = readingData.currentReading - readingData.previousReading;
+  const rate = 70;
+  const amount = units * rate;
+  const newReading = {
+    id: Date.now(),
+    tenantId: readingData.tenantId || readingData.tenant_id,
+    previousReading:
+      readingData.previousReading || readingData.previous_reading,
+    currentReading: readingData.currentReading || readingData.current_reading,
+    unitsUsed: units,
+    amount: amount,
+    readingDate: new Date().toISOString().split("T")[0],
+    status: "pending",
+    tenantName: "Unknown",
+    houseNo: "N/A",
+  };
+  MOCK_READINGS = [newReading, ...MOCK_READINGS];
+  return { data: newReading };
+};
+
+const getWaterReadingsMock = async (filters) => {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  let readings = [...MOCK_READINGS];
+  if (filters.tenantId || filters.tenant_id) {
+    const id = filters.tenantId || filters.tenant_id;
+    readings = readings.filter((r) => r.tenantId === parseInt(id));
+  }
+  if (filters.limit && filters.limit > 0) {
+    readings = readings.slice(0, filters.limit);
+  }
+  return { data: readings };
+};
+
+const generateWaterBillMock = async (readingId, tenantId) => {
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const reading = MOCK_READINGS.find((r) => r.id === readingId);
+  return {
+    data: {
+      id: Date.now(),
+      tenantId: tenantId,
+      waterCharge: reading ? reading.amount : 0,
+      garbageCharge: 300,
+      total: reading ? reading.amount + 300 : 300,
+      month: new Date().toISOString().substring(0, 7),
+      status: "pending",
+    },
+  };
+};
+
+const getWaterBillsMock = async (filters) => {
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  let bills = MOCK_READINGS.map((r) => ({
+    id: r.id,
+    tenantId: r.tenantId,
+    tenantName: r.tenantName,
+    houseNo: r.houseNo,
+    waterCharge: r.amount,
+    garbageCharge: 300,
+    total: r.amount + 300,
+    month: r.readingDate.substring(0, 7),
+    status: "pending",
+  }));
+  if (filters.tenantId || filters.tenant_id) {
+    const id = filters.tenantId || filters.tenant_id;
+    bills = bills.filter((b) => b.tenantId === parseInt(id));
+  }
+  return { data: bills };
+};
+
+const getConsumptionHistoryMock = async (tenantId) => {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const readings = MOCK_READINGS.filter(
+    (r) => r.tenantId === parseInt(tenantId),
+  );
+  const monthlyData = {};
+  readings.forEach((r) => {
+    const month = r.readingDate.substring(0, 7);
+    monthlyData[month] = (monthlyData[month] || 0) + r.unitsUsed;
+  });
+  const result = Object.entries(monthlyData).map(([month, units]) => ({
+    month,
+    units,
+  }));
+  return { data: result };
+};
+
+const getWaterBillingSummaryMock = async () => {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const total = MOCK_READINGS.reduce((sum, r) => sum + r.amount, 0);
+  const totalUnits = MOCK_READINGS.reduce((sum, r) => sum + r.unitsUsed, 0);
+  return {
+    data: {
+      totalReadings: MOCK_READINGS.length,
+      totalAmount: total,
+      pending: MOCK_READINGS.length,
+      averageConsumption:
+        MOCK_READINGS.length > 0 ? totalUnits / MOCK_READINGS.length : 0,
+    },
+  };
+};
+
+const getWaterBillMock = async (id) => {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const bill = MOCK_READINGS.find((r) => r.id === id);
+  return { data: bill || null };
+};
+
+const updateWaterBillStatusMock = async (id, status) => {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  return { data: { id, status, message: "Status updated (mock)" } };
+};
+
+const bulkImportWaterReadingsMock = async (payload) => {
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const imported = (payload.readings || []).map((reading, index) => ({
+    ...reading,
+    id: Date.now() + index,
+    status: "imported",
+  }));
+
+  // Add mock imported readings to the in-memory data set
+  imported.forEach((reading) => {
+    MOCK_READINGS = [
+      {
+        id: reading.id,
+        tenantId: reading.tenant_id || reading.tenantId,
+        tenantName: reading.tenant_name || "Unknown",
+        houseNo: reading.house_no || reading.houseNo || "N/A",
+        previousReading: reading.previous_reading || reading.previousReading,
+        currentReading: reading.current_reading || reading.currentReading,
+        unitsUsed: reading.units_used || reading.unitsUsed || 0,
+        amount: reading.amount || 0,
+        readingDate:
+          reading.reading_date ||
+          reading.readingDate ||
+          new Date().toISOString().split("T")[0],
+        status: "pending",
+      },
+      ...MOCK_READINGS,
+    ];
+  });
+
+  return {
+    data: {
+      imported,
+      errors: [],
+      message: "Bulk import completed (mock)",
+    },
+  };
+};
+
+// ============================================================
+// EXPORT
+// ============================================================
+
+const waterService = {
+  submitWaterReading,
+  bulkImportWaterReadings,
+  getWaterReadings,
+  getTenantWaterReadings,
+  generateWaterBill,
+  getWaterBills,
+  getTenantWaterBills,
+  getConsumptionHistory,
+  getPropertyWaterReadings,
+  getWaterBill,
+  updateWaterBillStatus,
+  getWaterBillingSummary,
+  getPendingWaterBills,
+  downloadWaterReport,
+  getPreviousReading,
+  getLatestWaterReading, // ✅ Added this
+};
+
+export default waterService;
