@@ -1,4 +1,4 @@
-# App/Routes/api.py
+# App/Routes/api.py - CORRECTED VERSION
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
 from App.Controllers.PaymentController import PaymentController
@@ -8,6 +8,7 @@ from App.Controllers.UnitController import UnitController
 from App.Controllers.WaterController import WaterController
 from datetime import datetime
 import logging
+import os  # Make sure this is imported
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +40,6 @@ def test():
 def protected():
     return jsonify({'message': 'This is a protected route!'}), 200
 
-
-# App/Routes/api.py - Add this after the health check
 
 @api_bp.route('/db-health', methods=['GET'])
 def db_health():
@@ -184,12 +183,10 @@ def create_water_reading():
 # ============================================================
 # WATER ROUTES - BULK IMPORT
 # ============================================================
-
 @api_bp.route('/water/readings/bulk', methods=['POST', 'OPTIONS'])
 @jwt_required()
 def bulk_import_water_readings():
     """Bulk import water readings from pasted text"""
-
     # Handle preflight OPTIONS request
     if request.method == 'OPTIONS':
         response = jsonify({'message': 'OK'})
@@ -302,7 +299,6 @@ def bulk_import_water_readings():
 # ============================================================
 # WATER ROUTES - PREVIOUS READING
 # ============================================================
-
 @api_bp.route('/water/readings/previous', methods=['GET'])
 @jwt_required()
 def get_previous_reading():
@@ -471,9 +467,8 @@ def mpesa_callback():
 
 
 # ============================================================
-# PAYMENT ALLOCATION ROUTES (ONLY ONCE!)
+# PAYMENT ALLOCATION ROUTES
 # ============================================================
-
 @api_bp.route('/payments/<int:payment_id>/allocate', methods=['POST'])
 @jwt_required()
 def allocate_payment(payment_id):
@@ -502,18 +497,12 @@ def reverse_payment(payment_id):
     return PaymentController.reverse_payment(payment_id)
 
 
-# App/Routes/api.py - Add this in the PAYMENT ROUTES section after the summary route
-
 # ============================================================
 # PAYBILL PAYMENT ROUTES
 # ============================================================
-
 @api_bp.route('/payments/paybill', methods=['POST'])
 def process_paybill_payment():
     """Process a Paybill payment from M-Pesa"""
-    import logging
-    logger = logging.getLogger(__name__)
-
     try:
         data = request.json
         account_reference = data.get('account_reference')
@@ -655,7 +644,6 @@ def list_routes():
 # ============================================================
 # SCHEDULER ROUTES
 # ============================================================
-
 @api_bp.route('/scheduler/run-monthly', methods=['POST'])
 @jwt_required()
 def scheduler_run_monthly():
@@ -781,7 +769,6 @@ def generate_rent():
 # ============================================================
 # SMS ROUTES
 # ============================================================
-
 @api_bp.route('/sms/test', methods=['POST'])
 @jwt_required()
 def sms_test():
@@ -849,7 +836,6 @@ def sms_history():
 # ============================================================
 # MONTHLY STATEMENT ROUTES
 # ============================================================
-
 @api_bp.route('/tenants/<int:tenant_id>/monthly-statement', methods=['GET'])
 @jwt_required()
 def get_tenant_monthly_statement(tenant_id):
@@ -913,7 +899,6 @@ def get_monthly_payment_summary():
 # ============================================================
 # BILLING ROUTES
 # ============================================================
-
 @api_bp.route('/billing/close-month', methods=['POST'])
 @jwt_required()
 def close_month():
@@ -924,6 +909,7 @@ def close_month():
         month = data.get('month')
 
         from datetime import datetime, timedelta
+        from App.Models.WaterReadingModel import WaterBill
 
         # Get all active tenants
         tenants = Tenant.query.filter_by(status='active').all()
@@ -965,7 +951,6 @@ def close_month():
 # ============================================================
 # TENANT-SPECIFIC BILLING ROUTES
 # ============================================================
-
 @api_bp.route('/billing/close-tenant-month', methods=['POST'])
 @jwt_required()
 def close_tenant_month():
@@ -982,8 +967,6 @@ def close_tenant_month():
             return jsonify({'error': 'tenant_id, year, and month are required'}), 400
 
         from datetime import datetime, timedelta
-        from App.Models.TenantModel import Tenant
-        from App.Models.PaymentModel import Payment
         from App.Models.WaterReadingModel import WaterBill
 
         tenant = Tenant.query.get(tenant_id)
@@ -1060,8 +1043,6 @@ def generate_tenant_rent():
             return jsonify({'error': 'tenant_id, year, and month are required'}), 400
 
         from datetime import datetime
-        from App.Models.TenantModel import Tenant
-        from App.Models.PaymentModel import Payment
 
         tenant = Tenant.query.get(tenant_id)
         if not tenant:
@@ -1128,8 +1109,6 @@ def generate_tenant_rent():
 def get_tenant_balance(tenant_id):
     """Get the current balance for a specific tenant"""
     try:
-        from App.Models.TenantModel import Tenant
-        from App.Models.PaymentModel import Payment
         from App.Models.WaterReadingModel import WaterBill
 
         tenant = Tenant.query.get(tenant_id)
@@ -1185,8 +1164,6 @@ def add_tenant_payment():
             return jsonify({'error': 'tenant_id and amount are required'}), 400
 
         from datetime import datetime
-        from App.Models.TenantModel import Tenant
-        from App.Models.PaymentModel import Payment
         import uuid
 
         tenant = Tenant.query.get(tenant_id)
@@ -1243,10 +1220,195 @@ def add_tenant_payment():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-# App/Routes/api.py - Add this route
 
 @api_bp.route('/payments/parse-sms', methods=['POST'])
 @jwt_required()
 def parse_payment_sms():
     """Parse M-Pesa SMS and find matching tenant"""
     return PaymentController.parse_payment_sms()
+
+
+# ============================================================
+# WHATSAPP WEBHOOK ROUTES
+# ============================================================
+@api_bp.route('/whatsapp/webhook', methods=['GET'])
+def whatsapp_webhook_verify():
+    """
+    Verify WhatsApp webhook endpoint
+    Meta sends a GET request to verify the webhook during setup
+    """
+    try:
+        # Get the verification parameters from Meta
+        mode = request.args.get('hub.mode')
+        token = request.args.get('hub.verify_token')
+        challenge = request.args.get('hub.challenge')
+
+        logger.info(f"📥 Webhook verification request - mode: {mode}, token: {token}")
+        logger.info(f"📥 Challenge: {challenge}")
+
+        # Get the verify token from environment variable
+        verify_token = os.getenv('WHATSAPP_VERIFY_TOKEN', 'rentmanager_webhook_2026')
+        logger.info(f"🔑 Expected verify token: {verify_token}")
+
+        # Check if the token matches
+        if mode and token:
+            if mode == 'subscribe' and token == verify_token:
+                logger.info("✅ Webhook verified successfully!")
+                # Meta expects just the challenge string as response
+                return challenge, 200
+            else:
+                logger.warning("❌ Webhook verification failed - token mismatch")
+                return jsonify({'error': 'Verification failed'}), 403
+
+        return jsonify({'error': 'Invalid request'}), 400
+
+    except Exception as e:
+        logger.error(f"❌ Webhook verification error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/whatsapp/webhook', methods=['POST'])
+def whatsapp_webhook_receive():
+    """
+    Receive WhatsApp webhook events from Meta
+    """
+    try:
+        data = request.json
+        logger.info(f"📥 WhatsApp webhook received: {data}")
+
+        # Process the webhook data (optional)
+        # You can add custom logic here
+
+        # Always return 200 to acknowledge receipt
+        return jsonify({'status': 'ok'}), 200
+
+    except Exception as e:
+        logger.error(f"❌ Webhook processing error: {str(e)}")
+        return jsonify({'status': 'error'}), 500
+
+
+# ============================================================
+# WHATSAPP ROUTES (FIXED INDENTATION - AT ROOT LEVEL)
+# ============================================================
+@api_bp.route('/whatsapp/status', methods=['GET'])
+def whatsapp_status():
+    """Check WhatsApp service status (No auth required for testing)"""
+    from App.Services.WhatsAppService import WhatsAppService
+
+    return jsonify({
+        'configured': WhatsAppService.is_configured(),
+        'phone_number_id': bool(WhatsAppService.WHATSAPP_PHONE_NUMBER_ID),
+        'access_token': bool(WhatsAppService.WHATSAPP_ACCESS_TOKEN),
+        'api_version': WhatsAppService.WHATSAPP_API_VERSION,
+        'from_number': WhatsAppService.WHATSAPP_FROM_NUMBER,
+        'message': 'WhatsApp service is configured and ready' if WhatsAppService.is_configured() else 'WhatsApp is not configured'
+    }), 200
+
+
+@api_bp.route('/whatsapp/send-test', methods=['POST'])
+def send_whatsapp_test():
+    """Send a test WhatsApp message (No auth required for testing)"""
+    try:
+        from App.Services.WhatsAppService import WhatsAppService
+
+        data = request.json
+        to_phone = data.get('phone', '254740766915')
+        message = data.get('message', 'Hello! This is a test message from RentManager API.')
+
+        if not to_phone:
+            return jsonify({'error': 'phone is required'}), 400
+
+        result = WhatsAppService.send_whatsapp_message(to_phone, message)
+
+        if result.get('success'):
+            return jsonify({
+                'success': True,
+                'message': 'Test message sent successfully',
+                'data': result.get('data'),
+                'message_id': result.get('message_id')
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': result.get('error'),
+                'status_code': result.get('status_code')
+            }), 500
+
+    except Exception as e:
+        logger.error(f"Error sending test WhatsApp: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/whatsapp/send-template', methods=['POST'])
+def send_whatsapp_template():
+    """Send a WhatsApp template message (No auth required for testing)"""
+    try:
+        from App.Services.WhatsAppService import WhatsAppService
+        data = request.json
+
+        to_phone = data.get('phone')
+        template_name = data.get('template_name')
+        components = data.get('components', [])
+
+        if not to_phone:
+            return jsonify({'error': 'phone is required'}), 400
+
+        if not template_name:
+            return jsonify({'error': 'template_name is required'}), 400
+
+        result = WhatsAppService.send_template_message(to_phone, template_name, components)
+
+        if result.get('success'):
+            return jsonify({
+                'success': True,
+                'message': 'Template message sent successfully',
+                'data': result.get('data'),
+                'message_id': result.get('message_id')
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': result.get('error'),
+                'status_code': result.get('status_code')
+            }), 500
+
+    except Exception as e:
+        logger.error(f"Error sending WhatsApp template: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/whatsapp/send-text', methods=['POST'])
+def send_whatsapp_text():
+    """Send a plain text WhatsApp message (No auth required for testing)"""
+    try:
+        from App.Services.WhatsAppService import WhatsAppService
+        data = request.json
+
+        to_phone = data.get('phone')
+        message = data.get('message')
+
+        if not to_phone:
+            return jsonify({'error': 'phone is required'}), 400
+
+        if not message:
+            return jsonify({'error': 'message is required'}), 400
+
+        result = WhatsAppService.send_whatsapp_message(to_phone, message)
+
+        if result.get('success'):
+            return jsonify({
+                'success': True,
+                'message': 'Message sent successfully',
+                'data': result.get('data'),
+                'message_id': result.get('message_id')
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': result.get('error'),
+                'status_code': result.get('status_code')
+            }), 500
+
+    except Exception as e:
+        logger.error(f"Error sending WhatsApp text: {str(e)}")
+        return jsonify({'error': str(e)}), 500
