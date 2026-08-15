@@ -1412,3 +1412,32 @@ def send_whatsapp_text():
     except Exception as e:
         logger.error(f"Error sending WhatsApp text: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/payments/<int:payment_id>/whatsapp-link', methods=['GET'])
+@jwt_required()
+
+def generate_whatsapp_link(payment_id):
+    """Generate a wa.me link for the admin to send a receipt via WhatsApp."""
+    from App.Services.WhatsAppService import WhatsAppService
+
+    payment = Payment.query.get(payment_id)
+    if not payment:
+        return jsonify({'error': 'Payment not found'}), 404
+
+    tenant = Tenant.query.get(payment.tenant_id)
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    if not tenant.phone:
+        return jsonify({'error': 'Tenant has no phone number'}), 400
+
+    link = WhatsAppService.generate_receipt_link(tenant, payment)
+
+    return jsonify({
+        'success': True,
+        'link': link,
+        'phone': tenant.phone,
+        'tenant': tenant.name,
+        'amount': payment.amount,
+        'receipt_no': payment.receipt_no
+    }), 200
