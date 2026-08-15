@@ -263,3 +263,56 @@ class WhatsAppService:
 
         # WhatsApp requires no '+' for the API, but includes it for display
         return phone
+
+        # Add this inside the WhatsAppService class, after _clean_phone_number
+
+    @staticmethod
+    def generate_receipt_link(tenant, payment):
+        """
+        Generate a wa.me link with a pre‑filled receipt message.
+        The admin clicks this link, WhatsApp opens on their phone, and they tap Send.
+        """
+        import urllib.parse
+
+        # Format the receipt message (same as format_receipt_message)
+        lines = []
+        lines.append("🏠 RENT MANAGER - PAYMENT RECEIPT")
+        lines.append("")
+        lines.append(f"Dear {tenant.name},")
+        lines.append("")
+        lines.append("✅ Payment Received")
+        lines.append("")
+        lines.append(
+            f"📅 Date: {payment.payment_date.strftime('%d/%m/%Y') if payment.payment_date else datetime.now().strftime('%d/%m/%Y')}")
+        lines.append(f"🏠 House: {tenant.unit.unit_number if tenant.unit else 'N/A'}")
+        lines.append(f"💰 Amount: KSh {payment.amount:,.2f}")
+        lines.append(f"📋 Receipt No: {payment.receipt_no}")
+        lines.append(
+            f"📆 Month: {payment.payment_for_month.strftime('%B %Y') if payment.payment_for_month else 'N/A'}")
+        lines.append("")
+        lines.append("Payment Details:")
+        lines.append(f"• Rent: KSh {payment.rent_amount or payment.amount:,.2f}")
+        lines.append(f"• Water: KSh {payment.water_amount or 0:,.2f}")
+        lines.append("")
+        if payment.notes:
+            lines.append(f"📝 Note: {payment.notes}")
+            lines.append("")
+        lines.append("Thank you for your payment!")
+        lines.append("")
+        lines.append("RentManager System")
+        lines.append("📞 Support: 0712345678")
+
+        message = "\n".join(lines)
+
+        # Clean the phone number for wa.me (international format, no leading 0, no '+')
+        phone = tenant.phone
+        phone = ''.join(filter(str.isdigit, phone))
+        if phone.startswith('0'):
+            phone = '254' + phone[1:]
+        elif not phone.startswith('254'):
+            phone = '254' + phone
+
+        # URL‑encode the message
+        encoded_message = urllib.parse.quote(message)
+        link = f"https://wa.me/{phone}?text={encoded_message}"
+        return link

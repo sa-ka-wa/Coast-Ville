@@ -1,7 +1,7 @@
-// services/tenants.js - Complete version
+// services/tenants.js - Updated version with NO mock fallback for individual tenant data
 import api from "./api";
 
-// Mock data (fallback only)
+// Mock data (fallback only for LIST view, NOT for individual tenant)
 let MOCK_TENANTS = [
   {
     id: 1,
@@ -57,7 +57,11 @@ let MOCK_TENANTS = [
   },
 ];
 
-// Get all tenants - TRY REAL API FIRST
+// ============================================================
+// LIST TENANTS - with mock fallback for UI testing
+// ============================================================
+
+// Get all tenants - TRY REAL API FIRST, fallback to mock for UI
 export const getTenants = async (filters = {}) => {
   try {
     console.log("📡 Fetching tenants with filters:", filters);
@@ -108,19 +112,108 @@ export const getTenants = async (filters = {}) => {
   }
 };
 
-// Get a single tenant by ID
+// ============================================================
+// SINGLE TENANT - NO MOCK FALLBACK (Use real data only)
+// ============================================================
+
+// Get a single tenant by ID - NO MOCK FALLBACK
 export const getTenant = async (id) => {
+  console.log(`📡 Fetching tenant with ID: ${id}`);
+  const response = await api.get(`/tenants/${id}`);
+  console.log("✅ Tenant Response:", response.data);
+  return response;
+};
+
+// ============================================================
+// TENANT PAYMENTS - NO MOCK FALLBACK
+// ============================================================
+
+// Get tenant payment history - NO MOCK FALLBACK
+export const getTenantPayments = async (id) => {
   try {
-    const response = await api.get(`/tenants/${id}`);
+    console.log(`📡 Fetching payments for tenant: ${id}`);
+    const response = await api.get(`/tenants/${id}/payments`);
+    console.log("✅ Payments Response:", response.data);
     return response;
   } catch (error) {
-    console.warn("⚠️ API failed, using mock data:", error.message);
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    const tenant = MOCK_TENANTS.find((t) => t.id === id);
-    if (!tenant) throw new Error("Tenant not found");
-    return { data: tenant };
+    console.warn(
+      `⚠️ Failed to fetch payments for tenant ${id}:`,
+      error.message,
+    );
+    // Return empty array instead of mock data
+    return { data: [] };
   }
 };
+
+// ============================================================
+// TENANT WATER READINGS - NO MOCK FALLBACK
+// ============================================================
+
+// Get tenant water readings - NO MOCK FALLBACK
+export const getTenantWaterReadings = async (id) => {
+  try {
+    console.log(`📡 Fetching water readings for tenant: ${id}`);
+    const response = await api.get(`/tenants/${id}/water/readings`);
+    console.log("✅ Water Readings Response:", response.data);
+    return response;
+  } catch (error) {
+    console.warn(
+      `⚠️ Failed to fetch water readings for tenant ${id}:`,
+      error.message,
+    );
+    return { data: [] };
+  }
+};
+
+// ============================================================
+// TENANT WATER BILLS - NO MOCK FALLBACK
+// ============================================================
+
+// Get tenant water bills - NO MOCK FALLBACK
+export const getTenantWaterBills = async (tenantId) => {
+  try {
+    console.log(`📡 Fetching water bills for tenant: ${tenantId}`);
+    const response = await api.get(`/tenants/${tenantId}/water/bills`);
+    console.log("✅ Water Bills Response:", response.data);
+    return response;
+  } catch (error) {
+    console.warn(
+      `⚠️ Failed to fetch water bills for tenant ${tenantId}:`,
+      error.message,
+    );
+    return { data: [] };
+  }
+};
+
+// ============================================================
+// TENANT STATS - NO MOCK FALLBACK
+// ============================================================
+
+// Get tenant statistics - NO MOCK FALLBACK
+export const getTenantStats = async (id) => {
+  try {
+    console.log(`📡 Fetching stats for tenant: ${id}`);
+    const response = await api.get(`/tenants/${id}/stats`);
+    console.log("✅ Tenant Stats Response:", response.data);
+    return response;
+  } catch (error) {
+    console.warn(`⚠️ Failed to fetch stats for tenant ${id}:`, error.message);
+    return {
+      data: {
+        total: 0,
+        active: 0,
+        vacating: 0,
+        vacated: 0,
+        totalPaid: 0,
+        totalBalance: 0,
+      },
+    };
+  }
+};
+
+// ============================================================
+// CRUD OPERATIONS - with mock fallback for UI testing
+// ============================================================
 
 // Add a new tenant
 export const addTenant = async (tenantData) => {
@@ -195,98 +288,6 @@ export const getTenantByPhone = async (phone) => {
   }
 };
 
-// Get tenant payment history
-export const getTenantPayments = async (id) => {
-  try {
-    const response = await api.get(`/tenants/${id}/payments`);
-    return response;
-  } catch (error) {
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    const payments = [
-      {
-        id: 1,
-        amount: 15000,
-        date: "2026-07-01",
-        method: "mpesa",
-        status: "paid",
-        receiptNo: "RCP-001",
-      },
-      {
-        id: 2,
-        amount: 15000,
-        date: "2026-06-01",
-        method: "mpesa",
-        status: "paid",
-        receiptNo: "RCP-002",
-      },
-    ];
-    return { data: payments };
-  }
-};
-
-// Get tenant water readings
-export const getTenantWaterReadings = async (id) => {
-  try {
-    const response = await api.get(`/tenants/${id}/water-readings`);
-    return response;
-  } catch (error) {
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    const readings = [
-      {
-        id: 1,
-        previousReading: 2450,
-        currentReading: 2478,
-        unitsUsed: 28,
-        amount: 1960,
-        readingDate: "2026-07-01",
-      },
-      {
-        id: 2,
-        previousReading: 2420,
-        currentReading: 2450,
-        unitsUsed: 30,
-        amount: 2100,
-        readingDate: "2026-06-01",
-      },
-    ];
-    return { data: readings };
-  }
-};
-
-// ✅ Get tenant water bills
-export const getTenantWaterBills = async (tenantId) => {
-  try {
-    const response = await api.get(`/tenants/${tenantId}/water/bills`);
-    return response;
-  } catch (error) {
-    console.warn(
-      "⚠️ API failed for getTenantWaterBills, using mock:",
-      error.message,
-    );
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    return {
-      data: [
-        {
-          id: 1,
-          month: "2026-06-01",
-          water_charge: 1200,
-          garbage_charge: 300,
-          total: 1500,
-          status: "paid",
-        },
-        {
-          id: 2,
-          month: "2026-07-01",
-          water_charge: 1500,
-          garbage_charge: 0,
-          total: 1500,
-          status: "pending",
-        },
-      ],
-    };
-  }
-}; // ✅ This closes the function properly
-
 // Update tenant status
 export const updateTenantStatus = async (id, status) => {
   try {
@@ -301,23 +302,9 @@ export const updateTenantStatus = async (id, status) => {
   }
 };
 
-// Get tenant statistics
-export const getTenantStats = async () => {
-  try {
-    const response = await api.get("/tenants/stats");
-    return response;
-  } catch (error) {
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    return {
-      data: {
-        total: MOCK_TENANTS.length,
-        active: MOCK_TENANTS.filter((t) => t.status === "active").length,
-        vacating: MOCK_TENANTS.filter((t) => t.status === "vacating").length,
-        vacated: MOCK_TENANTS.filter((t) => t.status === "vacated").length,
-      },
-    };
-  }
-};
+// ============================================================
+// BULK OPERATIONS - with mock fallback for UI testing
+// ============================================================
 
 // Bulk import tenants
 export const bulkImportTenants = async (tenants) => {
@@ -349,7 +336,10 @@ export const exportTenants = async () => {
   }
 };
 
-// Export all as default
+// ============================================================
+// EXPORT
+// ============================================================
+
 const tenantsService = {
   getTenants,
   getTenant,
@@ -360,7 +350,7 @@ const tenantsService = {
   getTenantByPhone,
   getTenantPayments,
   getTenantWaterReadings,
-  getTenantWaterBills, // ✅ Added this
+  getTenantWaterBills,
   updateTenantStatus,
   getTenantStats,
   bulkImportTenants,
