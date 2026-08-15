@@ -1087,6 +1087,53 @@ class PaymentController:
             logger.error(f"Error getting payment allocation: {str(e)}")
             return jsonify({'message': str(e)}), 500
 
+    @staticmethod
+    @jwt_required()
+    def update_allocation(payment_id):
+        """
+        Manually update payment allocation fields.
+        Expects JSON with any of: rent, water, deposit, excess, balance_due.
+        """
+        try:
+            data = request.json
+            payment = Payment.query.get(payment_id)
+            if not payment:
+                return jsonify({'error': 'Payment not found'}), 404
+
+            # Update only provided fields
+            if 'rent' in data:
+                payment.rent_amount = data['rent']
+            if 'water' in data:
+                payment.water_amount = data['water']
+            if 'deposit' in data:
+                payment.deposit_amount = data['deposit']
+            if 'excess' in data:
+                payment.excess_amount = data['excess']
+            if 'balance_due' in data:
+                payment.balance_due = data['balance_due']
+
+            db.session.commit()
+
+            # Return updated allocation
+            return jsonify({
+                'success': True,
+                'message': 'Allocation updated successfully',
+                'payment': payment.to_dict(),
+                'allocations': {
+                    'rent': payment.rent_amount,
+                    'water': payment.water_amount,
+                    'deposit': payment.deposit_amount,
+                    'excess': payment.excess_amount,
+                    'balance_due': payment.balance_due,
+                    'credited_to_next_month': payment.credited_to_next_month
+                }
+            }), 200
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error updating allocation: {str(e)}")
+            return jsonify({'error': str(e)}), 500
+
     # App/Controllers/PaymentController.py - Add these methods
 
     @staticmethod

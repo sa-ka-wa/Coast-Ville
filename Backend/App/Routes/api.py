@@ -475,6 +475,11 @@ def allocate_payment(payment_id):
     """Allocate payment to deposit, water, and rent"""
     return PaymentController.allocate_payment()
 
+@api_bp.route('/payments/<int:payment_id>/allocate', methods=['PUT'])
+@jwt_required()
+def update_allocation(payment_id):
+    return PaymentController.update_allocation(payment_id)
+
 
 @api_bp.route('/payments/<int:payment_id>/allocation', methods=['GET'])
 @jwt_required()
