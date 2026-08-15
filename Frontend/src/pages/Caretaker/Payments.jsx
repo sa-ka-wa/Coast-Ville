@@ -1,4 +1,4 @@
-// src/pages/Caretaker/Payments.jsx - Complete version with AI Bulk Import button next to property name
+// src/pages/Caretaker/Payments.jsx - Complete version with AI Bulk Import + Send Receipts after import using wa.me links
 import React, { useState, useEffect } from "react";
 import {
   Card,
@@ -64,7 +64,7 @@ import {
   confirmPayment,
   getPaymentStats,
   generateReceipt,
-  sendReceipt,
+  // sendReceipt, // ✅ replaced with openPaymentReceipt
   processPaymentAllocation,
   getPaymentAllocation,
   movePaymentToTenant,
@@ -73,6 +73,7 @@ import {
 import { getTenants } from "../../services/tenants";
 import { useProperty } from "../../context/PropertyContext";
 import { formatCurrency, formatDate } from "../../utils/formatters";
+import { openPaymentReceipt } from "../../utils/whatsapp";
 import { paymentSmsParser } from "../../utils/paymentSmsParser";
 import dayjs from "dayjs";
 import api from "../../services/api";
@@ -107,6 +108,12 @@ const Payments = () => {
 
   // AI Bulk Import state
   const [bulkImportModalVisible, setBulkImportModalVisible] = useState(false);
+
+  // ⭐ NEW: After import, send receipts state
+  const [importedPayments, setImportedPayments] = useState([]);
+  const [sendReceiptModalVisible, setSendReceiptModalVisible] = useState(false);
+  const [sendingReceipts, setSendingReceipts] = useState(false);
+  const [receiptSendResults, setReceiptSendResults] = useState([]);
 
   // Match modal state
   const [matchModalVisible, setMatchModalVisible] = useState(false);
@@ -243,13 +250,12 @@ const Payments = () => {
 
       if (values.send_receipt) {
         try {
-          await sendReceipt({
-            payment_id: response.data.payment.id,
-            method: "whatsapp",
-          });
-          message.success("📱 Receipt sent via WhatsApp!");
+          // ✅ Use wa.me link instead of API send
+          await openPaymentReceipt(response.data.payment.id);
+          // message will be shown by the utility
         } catch (e) {
-          console.warn("Receipt send failed:", e);
+          console.warn("Could not open WhatsApp link:", e);
+          message.warning("Could not open WhatsApp, but payment was recorded.");
         }
       }
 
@@ -399,13 +405,11 @@ const Payments = () => {
       const response = await confirmPayment(paymentData);
 
       try {
-        await sendReceipt({
-          payment_id: response.data.payment.id,
-          method: "whatsapp",
-        });
-        message.success("📱 Receipt sent via WhatsApp!");
+        // ✅ Use wa.me link
+        await openPaymentReceipt(response.data.payment.id);
+        // message will be shown by utility
       } catch (receiptError) {
-        console.warn("Receipt sending failed:", receiptError);
+        console.warn("Could not open WhatsApp link:", receiptError);
       }
 
       message.success("✅ Payment confirmed successfully!");
@@ -789,13 +793,12 @@ const Payments = () => {
                   }}
                 />
               </Tooltip>
-              <Tooltip title="Send Receipt">
+              <Tooltip title="Send Receipt via WhatsApp">
                 <Button
                   icon={<WhatsAppOutlined />}
                   size="small"
-                  onClick={() =>
-                    sendReceipt({ payment_id: record.id, method: "whatsapp" })
-                  }
+                  onClick={() => openPaymentReceipt(record.id)}
+                  style={{ color: "#25D366" }}
                 />
               </Tooltip>
               <Tooltip title="Reverse/Refund">
@@ -845,6 +848,51 @@ const Payments = () => {
   const confirmedCount = payments.filter((p) => p.status === "paid").length;
   const pendingCount = payments.filter((p) => p.status === "pending").length;
   const failedCount = payments.filter((p) => p.status === "failed").length;
+
+  // ⭐ NEW: Function to send all receipts for imported payments
+  const handleSendAllReceipts = async () => {
+    setSendingReceipts(true);
+    const results = [];
+    const updatedPayments = [...importedPayments];
+    for (let i = 0; i < updatedPayments.length; i++) {
+      const payment = updatedPayments[i];
+      try {
+        const result = await openPaymentReceipt(payment.id);
+        if (result.success) {
+          results.push({ id: payment.id, success: true });
+          updatedPayments[i].receipt_sent = true;
+          updatedPayments[i].error = false;
+        } else {
+          results.push({ id: payment.id, success: false, error: result.error });
+          updatedPayments[i].receipt_sent = false;
+          updatedPayments[i].error = true;
+        }
+      } catch (error) {
+        console.error(
+          `Failed to open receipt for payment ${payment.id}:`,
+          error,
+        );
+        results.push({ id: payment.id, success: false, error: error.message });
+        updatedPayments[i].receipt_sent = false;
+        updatedPayments[i].error = true;
+      }
+      setImportedPayments([...updatedPayments]);
+      // Small delay to avoid popup blocking
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    setReceiptSendResults(results);
+    setSendingReceipts(false);
+
+    const successCount = results.filter((r) => r.success).length;
+    if (successCount === results.length) {
+      message.success("✅ All receipts sent successfully!");
+    } else {
+      message.warning(
+        `Sent ${successCount}/${results.length} receipts. Check the list for errors.`,
+      );
+    }
+    fetchData();
+  };
 
   return (
     <div>
@@ -1108,7 +1156,7 @@ const Payments = () => {
         />
       </Card>
 
-      {/* New Payment Modal */}
+      {/* New Payment Modal - unchanged */}
       <Modal
         title={
           <Space>
@@ -1250,7 +1298,7 @@ const Payments = () => {
               <Form.Item name="send_receipt" valuePropName="checked">
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <input type="checkbox" style={{ width: 16, height: 16 }} />
-                  <span>Send receipt via WhatsApp after recording</span>
+                  <span>Open WhatsApp with receipt after recording</span>
                 </div>
               </Form.Item>
 
@@ -1547,7 +1595,7 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
                       border: "none",
                     }}
                     onClick={() => {
-                      message.info("Receipt will be sent to tenant's WhatsApp");
+                      message.info("Opening WhatsApp with receipt...");
                     }}
                   >
                     Send Receipt
@@ -1557,7 +1605,7 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
             )}
           </TabPane>
 
-          {/* Paybill Tab */}
+          {/* Paybill Tab - unchanged */}
           <TabPane
             tab={
               <span>
@@ -1722,7 +1770,7 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
         </Tabs>
       </Modal>
 
-      {/* Match Tenant Modal */}
+      {/* Match Tenant Modal - unchanged */}
       <Modal
         title={
           <Space>
@@ -1862,7 +1910,7 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
         )}
       </Modal>
 
-      {/* Allocation Modal */}
+      {/* Allocation Modal - unchanged */}
       <Modal
         title={
           <Space>
@@ -2004,7 +2052,7 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
         )}
       </Modal>
 
-      {/* Move Payment Modal */}
+      {/* Move Payment Modal - unchanged */}
       <Modal
         title={
           <Space>
@@ -2096,7 +2144,7 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
         )}
       </Modal>
 
-      {/* Reverse Payment Modal */}
+      {/* Reverse Payment Modal - unchanged */}
       <Modal
         title={
           <Space>
@@ -2210,7 +2258,7 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
         )}
       </Modal>
 
-      {/* Receipt Modal */}
+      {/* Receipt Modal - unchanged */}
       <Modal
         title={
           <Space>
@@ -2238,10 +2286,7 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
               }}
               onClick={() => {
                 if (selectedPayment?.id) {
-                  sendReceipt({
-                    payment_id: selectedPayment.id,
-                    method: "whatsapp",
-                  });
+                  openPaymentReceipt(selectedPayment.id);
                 }
               }}
             >
@@ -2359,13 +2404,132 @@ Paybill: 123456, Account: 101. Code: THG2JK9A1M.`}
         destroyOnClose
       >
         <IntelligentPaymentImport
-          onSuccess={() => {
-            setBulkImportModalVisible(false);
-            fetchData();
-            message.success("✅ Payments imported successfully!");
+          onSuccess={(importedData) => {
+            // Extract payments from the response (adjust according to actual structure)
+            const payments = importedData.payments || importedData || [];
+            setImportedPayments(payments);
+            setSendReceiptModalVisible(true);
+            // Keep bulk import modal open; we'll close it when the user finishes sending or skips.
           }}
-          onCancel={() => setBulkImportModalVisible(false)}
+          onCancel={() => {
+            setBulkImportModalVisible(false);
+            // also close any related modals if needed
+          }}
         />
+      </Modal>
+
+      {/* ⭐ NEW: Send Receipts Modal after Import */}
+      <Modal
+        title={
+          <Space>
+            <WhatsAppOutlined style={{ color: "#25D366", fontSize: 24 }} />
+            <span>Send Receipts to Tenants</span>
+            <Tag color="green">{importedPayments.length} payments</Tag>
+          </Space>
+        }
+        open={sendReceiptModalVisible}
+        onCancel={() => {
+          setSendReceiptModalVisible(false);
+          setImportedPayments([]);
+          setReceiptSendResults([]);
+          // Close the bulk import modal as well
+          setBulkImportModalVisible(false);
+        }}
+        footer={null}
+        width={700}
+        destroyOnClose
+      >
+        <Alert
+          message={`You have ${importedPayments.length} new payments from the bulk import.`}
+          description="Would you like to send a WhatsApp receipt to each tenant now?"
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+
+        <List
+          dataSource={importedPayments}
+          renderItem={(payment) => (
+            <List.Item>
+              <List.Item.Meta
+                avatar={
+                  <Avatar style={{ backgroundColor: "#1890ff" }}>
+                    {payment.tenantName?.[0] ||
+                      payment.tenant?.name?.[0] ||
+                      "?"}
+                  </Avatar>
+                }
+                title={
+                  payment.tenantName || payment.tenant?.name || "Unknown Tenant"
+                }
+                description={
+                  <Space>
+                    <span>
+                      🏠 {payment.houseNo || payment.unit?.unit_number || "N/A"}
+                    </span>
+                    <span>💰 {formatCurrency(payment.amount)}</span>
+                    <span>
+                      {payment.receipt_sent ? (
+                        <Tag color="green" icon={<CheckOutlined />}>
+                          Sent
+                        </Tag>
+                      ) : payment.error ? (
+                        <Tag color="red" icon={<ExclamationCircleOutlined />}>
+                          Failed
+                        </Tag>
+                      ) : (
+                        <Tag color="blue">Pending</Tag>
+                      )}
+                    </span>
+                  </Space>
+                }
+              />
+            </List.Item>
+          )}
+          locale={{ emptyText: "No payments to send receipts for." }}
+        />
+
+        <Divider />
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <div>
+            {receiptSendResults.length > 0 && (
+              <Text type="secondary">
+                Sent: {receiptSendResults.filter((r) => r.success).length} /{" "}
+                {importedPayments.length}
+              </Text>
+            )}
+          </div>
+          <Space>
+            <Button
+              onClick={() => {
+                setSendReceiptModalVisible(false);
+                setImportedPayments([]);
+                setReceiptSendResults([]);
+                setBulkImportModalVisible(false);
+                fetchData(); // Refresh payments list
+              }}
+            >
+              Skip
+            </Button>
+            <Button
+              type="primary"
+              icon={<WhatsAppOutlined />}
+              loading={sendingReceipts}
+              onClick={handleSendAllReceipts}
+              disabled={sendingReceipts || importedPayments.length === 0}
+              style={{ background: "#25D366", borderColor: "#25D366" }}
+            >
+              {sendingReceipts ? "Sending..." : "Send All Receipts"}
+            </Button>
+          </Space>
+        </div>
       </Modal>
     </div>
   );
