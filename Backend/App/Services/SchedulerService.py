@@ -325,6 +325,7 @@ class SchedulerService:
             tenants = Tenant.query.filter_by(status='active').all()
             count = 0
             no_reading = []
+            skipped = []
 
             for tenant in tenants:
                 # Get property water rate and garbage fee
@@ -340,6 +341,16 @@ class SchedulerService:
                 ).order_by(WaterReading.reading_date.desc()).first()
 
                 if latest_reading and latest_reading.status != 'billed':
+                    # 🔥 FIX: Check if units_used is valid
+                    if latest_reading.units_used is None or latest_reading.units_used <= 0:
+                        skipped.append({
+                            'tenant': tenant.name,
+                            'house': tenant.unit.unit_number if tenant.unit else 'N/A',
+                            'units_used': latest_reading.units_used,
+                            'reason': 'No consumption or NULL'
+                        })
+                        continue
+
                     # Check if bill already exists for this month
                     existing_bill = WaterBill.query.filter(
                         WaterBill.tenant_id == tenant.id,
@@ -347,8 +358,8 @@ class SchedulerService:
                     ).first()
 
                     if not existing_bill:
-                        # Calculate water charge using property's water rate
-                        water_charge = latest_reading.amount * water_rate if latest_reading.amount else 0
+                        # Calculate water charge using units_used and water_rate
+                        water_charge = latest_reading.units_used * water_rate
 
                         bill = WaterBill(
                             property_id=tenant.property_id,
@@ -375,10 +386,13 @@ class SchedulerService:
             logger.info(f"💧 Generated {count} water bills for {month_start.strftime('%B %Y')}")
             if no_reading:
                 logger.info(f"⏭️ {len(no_reading)} tenants with no reading")
+            if skipped:
+                logger.info(f"⏭️ {len(skipped)} tenants skipped due to invalid units_used")
             return {
                 'generated': count,
                 'no_reading': len(no_reading),
-                'details': no_reading[:10]
+                'skipped': len(skipped),
+                'details': no_reading[:10] + skipped[:10]
             }
 
         except Exception as e:
