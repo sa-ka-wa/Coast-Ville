@@ -1314,3 +1314,15 @@ class PaymentController:
             import traceback
             traceback.print_exc()
             return jsonify({'error': str(e)}), 500
+
+    @staticmethod
+    @jwt_required()
+    def get_receipt_link(payment_id):
+        payment = Payment.query.get(payment_id)
+        if not payment:
+            return jsonify({'error': 'Payment not found'}), 404
+        token = payment.generate_receipt_token()
+        # frontend URL: we need to get base URL from config or request
+        base_url = request.host_url.rstrip('/')
+        link = f"{base_url}/receipt/{token}"
+        return jsonify({'link': link, 'token': token}), 200

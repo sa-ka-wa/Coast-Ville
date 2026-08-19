@@ -1,6 +1,8 @@
 # App/Models/PaymentModel.py
 from App.Extension import db
 from datetime import datetime
+from itsdangerous import URLSafeTimedSerializer
+from flask import current_app
 
 
 class Payment(db.Model):
@@ -170,3 +172,15 @@ class Payment(db.Model):
             'year': year,
             'month_name': datetime(year, month, 1).strftime('%B %Y')
         }
+    def generate_receipt_token(self):
+        serializer = URLSafeTimedSerializer(current_app.config['SECRET_KEY'])
+        return serializer.dumps(self.id, salt='receipt-token')
+
+    @staticmethod
+    def verify_receipt_token(token):
+        try:
+            serializer = URLSafeTimedSerializer(current_app.config['SECRET_KEY'])
+            payment_id = serializer.loads(token, salt='receipt-token', max_age=86400 * 7)  # 7 days
+            return payment_id
+        except Exception:
+            return None

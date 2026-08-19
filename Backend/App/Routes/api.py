@@ -1420,9 +1420,8 @@ def send_whatsapp_text():
 
 @api_bp.route('/payments/<int:payment_id>/whatsapp-link', methods=['GET'])
 @jwt_required()
-
 def generate_whatsapp_link(payment_id):
-    """Generate a wa.me link for the admin to send a receipt via WhatsApp."""
+    """Generate a wa.me link that includes the professional receipt URL."""
     from App.Services.WhatsAppService import WhatsAppService
 
     payment = Payment.query.get(payment_id)
@@ -1436,7 +1435,13 @@ def generate_whatsapp_link(payment_id):
     if not tenant.phone:
         return jsonify({'error': 'Tenant has no phone number'}), 400
 
-    link = WhatsAppService.generate_receipt_link(tenant, payment)
+    # Generate the professional receipt token and URL
+    token = payment.generate_receipt_token()
+    base_url = request.host_url.rstrip('/')
+    receipt_url = f"{base_url}/receipt/{token}"
+
+    # Generate the wa.me link with the professional receipt URL included
+    link = WhatsAppService.generate_receipt_link(tenant, payment, receipt_url=receipt_url)
 
     return jsonify({
         'success': True,
@@ -1444,5 +1449,6 @@ def generate_whatsapp_link(payment_id):
         'phone': tenant.phone,
         'tenant': tenant.name,
         'amount': payment.amount,
-        'receipt_no': payment.receipt_no
+        'receipt_no': payment.receipt_no,
+        'receipt_url': receipt_url  # optional, for reference
     }), 200
