@@ -668,8 +668,16 @@ const MonthlyBillingContent = () => {
       await fetchData();
     } catch (error) {
       console.error("Error generating bills:", error);
+      // Log full response body for easier debugging
+      console.error("Server response:", error.response?.data);
+
+      const serverMessage =
+        error.response?.data?.error ||
+        error.response?.data?.message ||
+        (typeof error.response?.data === "string" ? error.response.data : null);
+
       appMessage.error(
-        error.response?.data?.error || "Failed to generate bills",
+        serverMessage || `Failed to generate bills (${error.message})`,
       );
     } finally {
       setGenerating(false);

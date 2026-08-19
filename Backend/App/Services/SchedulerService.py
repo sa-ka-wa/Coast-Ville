@@ -25,6 +25,7 @@ class SchedulerService:
             'overdue_notifications': 0,
             'reading_reminders': 0,
             'monthly_statements_sent': 0,
+            'estimated_bills': 0,
             'errors': []
         }
 
@@ -42,25 +43,42 @@ class SchedulerService:
                 results['monthly_statements_sent'] = statement_result
                 logger.info(f"📱 Monthly statements sent to {statement_result} tenants")
 
-            # 3. Send reading reminders to caretakers on the 23rd
+                # 3. Generate water bills for the previous month (if not already done)
+                previous_month = today.replace(day=1) - timedelta(days=1)
+                prev_year = previous_month.year
+                prev_month = previous_month.month
+                # Check if any bill exists for the previous month (to avoid duplicate runs)
+                existing = WaterBill.query.filter(
+                    WaterBill.month == previous_month.replace(day=1)
+                ).first()
+                if not existing:
+                    prev_bills = SchedulerService.generate_water_bills_for_month(prev_year, prev_month)
+                    results['water_bills_generated'] = prev_bills.get('generated', 0)
+                    logger.info(
+                        f"💧 Generated {results['water_bills_generated']} bills for previous month ({previous_month.strftime('%B %Y')})")
+                else:
+                    logger.info(f"ℹ️ Water bills for {previous_month.strftime('%B %Y')} already exist, skipping.")
+
+            # 4. Send reading reminders to caretakers on the 23rd
             if today.day == 23:
                 reminder_result = SchedulerService.send_reading_reminders_to_caretakers()
                 results['reading_reminders'] = reminder_result
                 logger.info(f"💧 Reading reminders sent to {reminder_result} caretakers")
 
-            # 4. Generate water bills on the 25th (if readings taken)
+            # 5. Generate water bills for the current month on 25th-28th (if readings taken)
             if today.day >= 25 and today.day <= 28:
+                # Use the existing generate_monthly_water_bills (which uses current month)
                 water_result = SchedulerService.generate_monthly_water_bills()
                 results['water_bills_generated'] = water_result.get('generated', 0)
-                logger.info(f"💧 Water bills generated: {results['water_bills_generated']}")
+                logger.info(f"💧 Current-month bills generated: {results['water_bills_generated']}")
 
-            # 5. Check overdue payments daily (after 5th)
+            # 6. Check overdue payments daily (after 5th)
             if today.day >= 5:
                 overdue_result = SchedulerService.check_overdue_payments()
                 results['overdue_notifications'] = overdue_result.get('notified', 0)
                 logger.info(f"📱 Overdue notifications sent: {results['overdue_notifications']}")
 
-            # 6. Generate estimated bills on the 30th/31st for missing readings
+            # 7. Generate estimated bills on the 30th/31st for missing readings
             if today.day >= 30:
                 estimated_result = SchedulerService.generate_estimated_water_bills()
                 results['estimated_bills'] = estimated_result.get('generated', 0)
@@ -330,8 +348,8 @@ class SchedulerService:
             for tenant in tenants:
                 # Get property water rate and garbage fee
                 property_obj = Property.query.get(tenant.property_id)
-                water_rate = property_obj.water_rate if property_obj else 70.0
-                garbage_fee = property_obj.garbage_fee if property_obj else 300.0
+                water_rate = property_obj.water_rate if property_obj and property_obj.water_rate is not None else 200.0
+                garbage_fee = property_obj.garbage_fee if property_obj and property_obj.garbage_fee is not None else 0.0
 
                 # Get the latest reading for this tenant (from current month)
                 latest_reading = WaterReading.query.filter(
@@ -622,8 +640,8 @@ RentManager System"""
                 if not existing_bill:
                     # Get property water rate
                     property_obj = Property.query.get(tenant.property_id)
-                    water_rate = property_obj.water_rate if property_obj else 70.0
-                    garbage_fee = property_obj.garbage_fee if property_obj else 300.0
+                    water_rate = property_obj.water_rate if property_obj and property_obj.water_rate is not None else 200.0
+                    garbage_fee = property_obj.garbage_fee if property_obj and property_obj.garbage_fee is not None else 0.0
 
                     # Use average consumption from previous months
                     avg_units = SchedulerService._calculate_average_consumption(tenant.id)
