@@ -1418,6 +1418,41 @@ def send_whatsapp_text():
         logger.error(f"Error sending WhatsApp text: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+
+# ============================================================
+# PUBLIC RECEIPT ROUTE (No authentication)
+# ============================================================
+@api_bp.route('/public/receipt/<token>', methods=['GET'])
+def public_receipt(token):
+    """Public endpoint to fetch receipt data (no authentication)."""
+    from App.Models.PaymentModel import Payment
+
+    payment_id = Payment.verify_receipt_token(token)
+    if not payment_id:
+        return jsonify({'error': 'Invalid or expired receipt link'}), 404
+
+    payment = Payment.query.get(payment_id)
+    if not payment:
+        return jsonify({'error': 'Payment not found'}), 404
+
+    tenant = payment.tenant
+    return jsonify({
+        'id': payment.id,
+        'receipt_no': payment.receipt_no,
+        'tenant_name': tenant.name if tenant else 'N/A',
+        'house_no': tenant.unit.unit_number if tenant and tenant.unit else 'N/A',
+        'property_name': payment.property.name if payment.property else 'N/A',
+        'amount': payment.amount,
+        'rent_amount': payment.rent_amount or 0,
+        'water_amount': payment.water_amount or 0,
+        'deposit_amount': payment.deposit_amount or 0,
+        'payment_date': payment.payment_date.isoformat() if payment.payment_date else None,
+        'payment_method': payment.payment_method,
+        'status': payment.status,
+        'balance': tenant.balance if tenant else 0,
+        'created_at': payment.created_at.isoformat() if payment.created_at else None
+    }), 200
+
 @api_bp.route('/payments/<int:payment_id>/whatsapp-link', methods=['GET'])
 @jwt_required()
 def generate_whatsapp_link(payment_id):
